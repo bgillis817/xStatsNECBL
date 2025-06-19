@@ -458,18 +458,3 @@ run_complete_xwoba_pipeline <- function(folder_path = "C:/Users/bengi/OneDrive/D
   return(final_package)
 }
 
-# ===================================================================
-# USAGE
-# ===================================================================
-
-cat(" COMPLETE xwOBA PIPELINE READY!\n")
-cat("==================================\n")
-cat(" To run the complete pipeline:\n")
-cat("   results <- run_complete_xwoba_pipeline()\n")
-cat("\n This will:\n")
-cat("   1. Combine all CSV files in your folder\n")
-cat("   2. Clean and standardize the data\n")
-cat("   3. Engineer features for modeling\n")
-cat("   4. Analyze sweet spots\n")
-cat("   5. Prepare training datasets\n")
-cat("   6. Save everything for modeling work\n")
