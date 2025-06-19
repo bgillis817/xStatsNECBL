@@ -248,14 +248,14 @@ engineer_xwoba_features <- function(clean_data) {
   
   cat("🔧 Creating feature categories:\n")
   
-  # 1. RAW MEASUREMENTS
+  # 1. Raw measurements
   cat("  - Raw measurements\n")
   raw_features <- data.frame(
     exit_velocity = ev,
     launch_angle = la
   )
   
-  # 2. POLYNOMIAL FEATURES
+  # 2. Polynomial features
   cat("  - Polynomial features\n")
   poly_features <- data.frame(
     ev_squared = ev^2,
@@ -264,7 +264,7 @@ engineer_xwoba_features <- function(clean_data) {
     la_cubed = la^3
   )
   
-  # 3. INTERACTION FEATURES
+  # 3. Interaction features
   cat("  - Interaction features\n")
   interaction_features <- data.frame(
     ev_la = ev * la,
@@ -295,7 +295,7 @@ engineer_xwoba_features <- function(clean_data) {
     ev_cos = ev * cos(la_rad)
   )
   
-  # 6. CATEGORICAL FEATURES
+  # 6. Categorical features
   cat("  - Categorical features\n")
   categorical_features <- data.frame(
     ev_elite = as.numeric(ev >= 100),
@@ -311,7 +311,7 @@ engineer_xwoba_features <- function(clean_data) {
     weak_contact = as.numeric(ev < 70 | abs(la) > 45)
   )
   
-  # 7. STATISTICAL FEATURES
+  # 7. Stat features
   cat("  - Statistical features\n")
   statistical_features <- data.frame(
     ev_z_score = scale(ev)[,1],
@@ -320,7 +320,7 @@ engineer_xwoba_features <- function(clean_data) {
     la_rank = rank(la)
   )
   
-  # 8. DOMAIN-SPECIFIC FEATURES
+  # 8. Domain specific features
   cat("  - Domain-specific features\n")
   domain_features <- data.frame(
     hr_zone = as.numeric(ev >= 100 & la >= 20 & la <= 35),
@@ -330,7 +330,7 @@ engineer_xwoba_features <- function(clean_data) {
     high_value_zone = as.numeric(ev >= 90 & la >= 10 & la <= 40)
   )
   
-  # 9. SWEET SPOT FEATURES
+  # 9. Sweet spot
   cat("  - Sweet spot analysis features\n")
   sweet_spot_features <- data.frame(
     sweet_spot_gradient = exp(-((ev - 100)^2 / 100 + (la - 25)^2 / 100)),
@@ -428,7 +428,7 @@ analyze_sweet_spots <- function(clean_data, features) {
 
 prepare_ml_training_datasets <- function(clean_data, features, sweet_spot_analysis) {
   
-  cat("\n=== PREPARING ML TRAINING DATASETS ===\n")
+  cat("\n=== PREPARING DATASETS ===\n")
   
   # 2024 MLB wOBA weights (can add other stuff as time goes)
   woba_weights <- list(
@@ -531,7 +531,7 @@ run_complete_xwoba_pipeline <- function(folder_path = "Navs CSVs", use_google_dr
   write.csv(cbind(training_package$features, training_package$targets), 
             "xwoba_training_data.csv", row.names = FALSE)
   
-  cat("\n🎉 PIPELINE COMPLETE!\n")
+  cat("\n PIPELINE COMPLETE\n")
   cat("=====================\n")
   cat("Combined", nrow(clean_data), "balls in play\n")
   cat("Created", ncol(features), "features\n")
