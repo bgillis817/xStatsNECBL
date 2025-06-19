@@ -5,7 +5,7 @@ suppressPackageStartupMessages({
   pacman::p_load(
     dplyr, readr, data.table,
     ggplot2, gridExtra, viridis,
-    tidyr, lubridate, stringr
+    tidyr, lubridate, stringr, googledrive
   )
 })
 
@@ -445,7 +445,7 @@ run_complete_xwoba_pipeline <- function(folder_path = "C:/Users/bengi/OneDrive/D
   write.csv(cbind(training_package$features, training_package$targets), 
             "xwoba_training_data.csv", row.names = FALSE)
   
-  cat("\n🎉 PIPELINE COMPLETE!\n")
+
   cat("=====================\n")
   cat("Combined", nrow(clean_data), "balls in play\n")
   cat("Created", ncol(features), "features\n")
