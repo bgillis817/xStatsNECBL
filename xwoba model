@@ -1,0 +1,535 @@
+# ULTIMATE xwOBA MODEL - Maximum Correlation Focus
+# Advanced feature engineering to push correlation above 80%
+
+# ===================================================================
+# ULTIMATE FEATURE ENGINEERING FOR MAXIMUM CORRELATION
+# ===================================================================
+
+create_ultimate_features <- function(raw_data) {
+  
+  
+  # Filter to batted balls with complete data
+  pa_data <- raw_data %>%
+    filter(
+      PlayResult %in% c("Single", "Double", "Triple", "HomeRun", "Out", 
+                        "FieldersChoice", "Error", "Sacrifice") &
+      !is.na(ExitSpeed) & ExitSpeed > 0 &
+      !is.na(Angle)
+    )
+  
+  cat("Total batted balls:", nrow(pa_data), "\n")
+  
+  # Outcome classification
+  pa_data$outcome <- case_when(
+    pa_data$PlayResult %in% c("Single") ~ "single",
+    pa_data$PlayResult %in% c("Double") ~ "double",
+    pa_data$PlayResult %in% c("Triple") ~ "triple", 
+    pa_data$PlayResult %in% c("HomeRun") ~ "home_run",
+    pa_data$PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice") ~ "out",
+    TRUE ~ "other"
+  )
+  
+  pa_data <- pa_data[pa_data$outcome != "other", ]
+  
+  # Core measurements
+  ev <- pa_data$ExitSpeed
+  la <- pa_data$Angle
+  distance <- ifelse(is.na(pa_data$Distance), 0, pa_data$Distance)
+  bearing <- ifelse(is.na(pa_data$Bearing), 0, pa_data$Bearing)
+  hang_time <- ifelse(is.na(pa_data$HangTime), 0, pa_data$HangTime)
+  max_height <- ifelse(is.na(pa_data$MaxHeight), 0, pa_data$MaxHeight)
+  contact_x <- ifelse(is.na(pa_data$ContactPositionX), 0, pa_data$ContactPositionX)
+  contact_y <- ifelse(is.na(pa_data$ContactPositionY), 0, pa_data$ContactPositionY)
+  
+  # ===============================
+  # 1. EXTREME POLYNOMIAL FEATURES
+  # ===============================
+  
+  extreme_polynomials <- data.frame(
+    # High-order EV polynomials
+    ev = ev,
+    ev_2 = ev^2,
+    ev_3 = ev^3,
+    ev_4 = pmin(ev^4, 1e10),
+    ev_5 = pmin(ev^5, 1e12),
+    ev_6 = pmin(ev^6, 1e14),
+    
+
+    la = la,
+    la_2 = la^2,
+    la_3 = la^3,
+    la_4 = pmin(la^4, 1e8),
+    la_5 = pmin(la^5, 1e10),
+    la_6 = pmin(la^6, 1e12),
+    
+    # Distance polynomials
+    distance = distance,
+    distance_2 = distance^2,
+    distance_3 = pmin(distance^3, 1e12),
+    distance_4 = pmin(distance^4, 1e15),
+    
+    # Cross polynomials
+    ev_2_la_2 = ev^2 * la^2,
+    ev_3_la_3 = pmin(ev^3 * la^3, 1e12),
+    ev_4_la_4 = pmin(ev^4 * la^4, 1e15)
+  )
+  
+ 
+  cat("  -  EV-LA interactions\n")
+  
+  ev_la_features <- data.frame(
+    # All order combinations
+    ev_la = ev * la,
+    ev_la_2 = ev * la^2,
+    ev_la_3 = ev * la^3,
+    ev_la_4 = ev * la^4,
+    ev_la_5 = ev * la^5,
+    
+    ev_2_la = ev^2 * la,
+    ev_2_la_2 = ev^2 * la^2,
+    ev_2_la_3 = ev^2 * la^3,
+    ev_2_la_4 = ev^2 * la^4,
+    
+    ev_3_la = ev^3 * la,
+    ev_3_la_2 = ev^3 * la^2,
+    ev_3_la_3 = pmin(ev^3 * la^3, 1e12),
+    
+    ev_4_la = pmin(ev^4 * la, 1e10),
+    ev_4_la_2 = pmin(ev^4 * la^2, 1e12),
+    
+    ev_5_la = pmin(ev^5 * la, 1e12),
+    ev_6_la = pmin(ev^6 * la, 1e14),
+    
+    # Reciprocal interactions
+    ev_div_la = ifelse(abs(la) > 0.1, ev / abs(la), 0),
+    la_div_ev = ifelse(ev > 0, la / ev, 0),
+    
+    # Exponential-like features
+    ev_exp_la = ev * exp(pmin(abs(la) / 30, 3)),
+    la_exp_ev = la * exp(pmin(ev / 100, 3))
+  )
+  
+  # ===============================
+  # 3. DISTANCE-TRAJECTORY 
+  # ===============================
+  cat("  - Distance-trajectory features\n")
+  
+  trajectory_mega <- data.frame(
+    # All distance interactions
+    ev_distance = ev * distance,
+    ev_2_distance = ev^2 * distance,
+    ev_3_distance = pmin(ev^3 * distance, 1e12),
+    ev_4_distance = pmin(ev^4 * distance, 1e14),
+    
+    la_distance = la * distance,
+    la_2_distance = la^2 * distance,
+    la_3_distance = pmin(la^3 * distance, 1e10),
+    la_4_distance = pmin(la^4 * distance, 1e12),
+    
+    # 3-way interactions
+    ev_la_distance = ev * la * distance / 1000,
+    ev_2_la_distance = ev^2 * la * distance / 100000,
+    ev_la_2_distance = ev * la^2 * distance / 10000,
+    ev_3_la_distance = pmin(ev^3 * la * distance / 1000000, 1e8),
+    ev_la_3_distance = pmin(ev * la^3 * distance / 100000, 1e8),
+    
+    # Distance efficiency features
+    distance_per_ev = ifelse(ev > 0, distance / ev, 0),
+    distance_per_la = ifelse(abs(la) > 0.1, distance / abs(la), 0),
+    distance_per_ev_la = ifelse(ev * abs(la) > 0, distance / (ev * abs(la)), 0),
+    
+    # Trajectory quality
+    trajectory_quality_1 = ev * distance * (1 / (1 + abs(la - 20))) / 10000,
+    trajectory_quality_2 = ev * distance * (1 / (1 + abs(la - 25))) / 10000,
+    trajectory_quality_3 = ev * distance * (1 / (1 + abs(la - 30))) / 10000
+  )
+  
+  # ===============================
+  # 4. BEARING AND FIELD POSITION
+  # ===============================
+  cat("  - bearing and field features\n")
+  
+  bearing_features <- data.frame(
+    # Bearing polynomials
+    bearing = bearing,
+    bearing_2 = bearing^2,
+    bearing_3 = bearing^3,
+    bearing_4 = bearing^4,
+    bearing_abs = abs(bearing),
+    bearing_abs_2 = abs(bearing)^2,
+    bearing_abs_3 = abs(bearing)^3,
+    
+    # Bearing-EV interactions
+    bearing_ev = abs(bearing) * ev,
+    bearing_2_ev = bearing^2 * ev,
+    bearing_ev_2 = abs(bearing) * ev^2,
+    bearing_3_ev = abs(bearing)^3 * ev,
+    bearing_ev_3 = abs(bearing) * ev^3,
+    
+    # Bearing-distance interactions
+    bearing_distance = abs(bearing) * distance,
+    bearing_2_distance = bearing^2 * distance,
+    bearing_distance_2 = abs(bearing) * distance^2,
+    
+    # 3-way bearing interactions
+    bearing_ev_distance = abs(bearing) * ev * distance / 1000,
+    bearing_2_ev_distance = bearing^2 * ev * distance / 10000,
+    bearing_ev_2_distance = abs(bearing) * ev^2 * distance / 100000,
+    
+    # Field coordinates
+    field_x = distance * sin(bearing * pi / 180),
+    field_y = distance * cos(bearing * pi / 180),
+    field_x_2 = (distance * sin(bearing * pi / 180))^2,
+    field_y_2 = (distance * cos(bearing * pi / 180))^2,
+    field_x_3 = (distance * sin(bearing * pi / 180))^3,
+    field_y_3 = (distance * cos(bearing * pi / 180))^3,
+    
+    # Field position quality
+    center_field_bonus = (30 - pmin(abs(bearing), 30)) / 30,
+    gap_penalty = pmax(0, (abs(bearing) - 20)) / 25,
+    extreme_pull_penalty = pmax(0, (abs(bearing) - 40)) / 20
+  )
+  
+  # ===============================
+  # 5. HANG TIME AND HEIGHT
+  # ===============================
+  cat("  - Hang time and height features\n")
+  
+  hang_height_features <- data.frame(
+    # Raw features
+    hang_time = hang_time,
+    max_height = max_height,
+    
+    # Polynomials
+    hang_time_2 = hang_time^2,
+    hang_time_3 = hang_time^3,
+    max_height_2 = max_height^2,
+    max_height_3 = max_height^3,
+    
+    # Efficiency metrics
+    trajectory_efficiency = ifelse(hang_time > 0, distance / hang_time, 0),
+    height_efficiency = ifelse(max_height > 0, distance / max_height, 0),
+    hang_height_ratio = ifelse(max_height > 0, hang_time / max_height, 0),
+    
+    # Interactions with EV/LA
+    hang_ev = hang_time * ev,
+    hang_ev_2 = hang_time * ev^2,
+    hang_la = hang_time * abs(la),
+    hang_la_2 = hang_time * la^2,
+    
+    height_ev = max_height * ev,
+    height_ev_2 = max_height * ev^2,
+    height_la = max_height * abs(la),
+    height_la_2 = max_height * la^2,
+    
+    # 3-way interactions
+    hang_ev_la = hang_time * ev * abs(la) / 1000,
+    height_ev_la = max_height * ev * abs(la) / 1000,
+    hang_height_ev = hang_time * max_height * ev / 1000,
+    
+    # Advanced trajectory metrics
+    hang_per_distance = ifelse(distance > 0, hang_time / distance, 0),
+    height_per_distance = ifelse(distance > 0, max_height / distance, 0)
+  )
+  
+  # ===============================
+  # 6. CONTACT POSITION FEATURES
+  # ===============================
+  cat("  - Contact position  features\n")
+  
+  contact_features <- data.frame(
+    # Raw contact
+    contact_x = contact_x,
+    contact_y = contact_y,
+    contact_distance = sqrt(contact_x^2 + contact_y^2),
+    
+    # Contact polynomials
+    contact_x_2 = contact_x^2,
+    contact_y_2 = contact_y^2,
+    contact_x_3 = contact_x^3,
+    contact_y_3 = contact_y^3,
+    contact_distance_2 = (sqrt(contact_x^2 + contact_y^2))^2,
+    contact_distance_3 = (sqrt(contact_x^2 + contact_y^2))^3,
+    
+    # Contact quality metrics
+    contact_quality = 1 / (1 + sqrt(contact_x^2 + contact_y^2)),
+    contact_quality_2 = (1 / (1 + sqrt(contact_x^2 + contact_y^2)))^2,
+    sweet_spot = as.numeric(sqrt(contact_x^2 + contact_y^2) < 1.0),
+    perfect_contact = as.numeric(sqrt(contact_x^2 + contact_y^2) < 0.5),
+    
+    # Contact-outcome interactions
+    contact_ev = sqrt(contact_x^2 + contact_y^2) * ev,
+    contact_ev_2 = sqrt(contact_x^2 + contact_y^2) * ev^2,
+    contact_la = sqrt(contact_x^2 + contact_y^2) * abs(la),
+    contact_distance_interaction = sqrt(contact_x^2 + contact_y^2) * distance,
+    
+    # Sweet spot interactions
+    sweet_spot_ev = as.numeric(sqrt(contact_x^2 + contact_y^2) < 1.0) * ev,
+    sweet_spot_ev_2 = as.numeric(sqrt(contact_x^2 + contact_y^2) < 1.0) * ev^2,
+    sweet_spot_la = as.numeric(sqrt(contact_x^2 + contact_y^2) < 1.0) * abs(la)
+  )
+  
+  # ===============================
+  # 7. OUTCOME-SPECIFIC PROBABILITY ZONES
+  # ===============================
+  cat("  - Outcome-specific probability zones\n")
+  
+  # Create multiple definitions for each outcome
+  outcome_zones <- data.frame(
+    # Multiple HR zones
+    hr_zone_1 = as.numeric(ev >= 95 & la >= 20 & la <= 40),
+    hr_zone_2 = as.numeric(ev >= 100 & la >= 15 & la <= 45),
+    hr_zone_3 = as.numeric(distance > 320 & ev >= 90),
+    hr_zone_4 = as.numeric(ev >= 105 & la >= 10),
+    hr_zone_5 = as.numeric(ev >= 98 & la >= 25 & la <= 35),
+    hr_zone_6 = as.numeric(ev >= 90 & distance > 330),
+    hr_zone_7 = as.numeric(ev >= 92 & la >= 28 & la <= 32),
+    
+    # Multiple double zones
+    double_zone_1 = as.numeric(distance >= 240 & distance < 320 & ev >= 80),
+    double_zone_2 = as.numeric(abs(bearing) > 20 & distance >= 220),
+    double_zone_3 = as.numeric(la >= 5 & la <= 22 & ev >= 85),
+    double_zone_4 = as.numeric(ev >= 90 & la >= 8 & la <= 25),
+    double_zone_5 = as.numeric(distance >= 260 & abs(bearing) > 15),
+    
+    # Multiple single zones
+    single_zone_1 = as.numeric(distance >= 120 & distance < 250 & ev >= 65),
+    single_zone_2 = as.numeric(la >= 0 & la <= 25 & ev >= 70 & ev < 95),
+    single_zone_3 = as.numeric(ev >= 75 & distance >= 150 & distance < 270),
+    single_zone_4 = as.numeric(la >= -5 & la <= 30 & ev >= 65),
+    
+    # Quality contact zones
+    barrel_1 = as.numeric(ev >= 98 & la >= 26 & la <= 30),
+    barrel_2 = as.numeric(ev >= 95 & la >= 24 & la <= 32),
+    quality_1 = as.numeric(ev >= 85 & la >= 8 & la <= 32),
+    quality_2 = as.numeric(ev >= 80 & la >= 10 & la <= 30),
+    elite_1 = as.numeric(ev >= 100 & la >= 15 & la <= 35),
+    elite_2 = as.numeric(ev >= 95 & distance > 250)
+  )
+  
+  # ===============================
+  # ===============================
+  cat("  -  interaction combinations\n")
+  
+  mega_combos <- data.frame(
+    # Ultimate 4-way interactions
+    ev_la_distance_bearing = ev * la * distance * abs(bearing) / 100000,
+    ev_la_hang_height = ev * la * hang_time * max_height / 100000,
+    ev_distance_bearing_contact = ev * distance * abs(bearing) * sqrt(contact_x^2 + contact_y^2) / 100000,
+    
+    # Power scores
+    power_score_1 = ev^2 * pmax(0, la) / 1000,
+    power_score_2 = ev^2 * pmax(0, (la - 10)) / 1000,
+    power_score_3 = ev^2 * pmax(0, (la - 15)) / 1000,
+    power_score_4 = ev^3 * pmax(0, la) / 100000,
+    
+    # Contact quality scores
+    contact_score_1 = ev * (1 / (1 + abs(la - 20))) * (1 / (1 + abs(bearing) / 30)) / 100,
+    contact_score_2 = ev * (1 / (1 + abs(la - 25))) * (1 / (1 + abs(bearing) / 40)) / 100,
+    contact_score_3 = ev * distance * (1 / (1 + sqrt(contact_x^2 + contact_y^2))) / 1000,
+    
+    # Percentile features
+    ev_percentile = rank(ev) / length(ev),
+    distance_percentile = ifelse(distance > 0, rank(distance) / sum(distance > 0), 0),
+    combined_percentile = (rank(ev) + ifelse(distance > 0, rank(distance), 0)) / (2 * length(ev)),
+    
+    # Advanced combinations
+    optimal_combination_1 = ev * (40 - abs(la - 20)) * (45 - pmin(abs(bearing), 45)) / 10000,
+    optimal_combination_2 = ev^2 * (35 - abs(la - 25)) * distance / 1000000,
+    optimal_combination_3 = ev * la * distance * (1 / (1 + abs(bearing) / 30)) / 100000
+  )
+  
+  # ===============================
+  # COMBINE ALL FEATURES
+  # ===============================
+  
+  all_features <- cbind(
+    extreme_polynomials,
+    ev_la_features,
+    trajectory_mega,
+    bearing_features,
+    hang_height_features,
+    contact_features,
+    outcome_zones,
+    mega_combos
+  )
+  
+  # Clean extreme values
+  all_features[is.infinite(as.matrix(all_features))] <- 0
+  all_features[abs(as.matrix(all_features)) > 1e15] <- 0
+  all_features[is.na(all_features)] <- 0
+  
+  cat("\nUltimate feature engineering complete!\n")
+  cat("  Total features created:", ncol(all_features), "\n")
+  cat("  Total batted balls processed:", nrow(all_features), "\n")
+  
+  return(list(
+    features = all_features,
+    outcomes = pa_data$outcome,
+    pa_data = pa_data
+  ))
+}
+
+# ===============================
+# MAXIMUM CORRELATION MODEL
+# ===============================
+
+train_maximum_correlation_xwoba <- function(raw_data) {
+  
+  cat("  xwOBA MODEL\n")
+  cat("==================================\n")
+
+  
+  # Create ultimate features
+  feature_result <- create_ultimate_features(raw_data)
+  features <- feature_result$features
+  outcomes <- feature_result$outcomes
+  
+  # Prepare targets
+  outcome_mapping <- c("out" = 0, "single" = 1, "double" = 2, "triple" = 3, "home_run" = 4)
+  y_class <- outcome_mapping[outcomes]
+  
+  # Calculate actual wOBA
+  woba_weights <- c("out" = 0.000, "single" = 0.888, "double" = 1.271, 
+                    "triple" = 1.616, "home_run" = 2.101)
+  actual_woba <- woba_weights[outcomes]
+  
+  cat("Ultimate model summary:\n")
+  cat("  Features:", ncol(features), "\n")
+  cat("  Samples:", nrow(features), "\n")
+  cat("  Mean wOBA:", round(mean(actual_woba), 3), "\n")
+  
+  # Enhanced train/test split
+  set.seed(42)
+  train_idx <- createDataPartition(outcomes, p = 0.7, list = FALSE)
+  remaining_idx <- setdiff(1:length(outcomes), train_idx)
+  
+  val_idx <- createDataPartition(outcomes[remaining_idx], p = 0.5, list = FALSE)
+  test_idx <- setdiff(1:length(remaining_idx), val_idx)
+  
+  final_val_idx <- remaining_idx[val_idx]
+  final_test_idx <- remaining_idx[test_idx]
+  
+  # Split data
+  X_train <- as.matrix(features[train_idx, ])
+  X_val <- as.matrix(features[final_val_idx, ])
+  X_test <- as.matrix(features[final_test_idx, ])
+  
+  y_train <- y_class[train_idx]
+  y_val <- y_class[final_val_idx]
+  y_test <- y_class[final_test_idx]
+  
+  woba_train <- actual_woba[train_idx]
+  woba_val <- actual_woba[final_val_idx]
+  woba_test <- actual_woba[final_test_idx]
+  
+  # Create DMatrix
+  dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+  dval <- xgb.DMatrix(data = X_val, label = y_val)
+  dtest <- xgb.DMatrix(data = X_test, label = y_test)
+  
+  #  CORRELATION PARAMETERS
+  params <- list(
+    objective = "multi:softprob",
+    eval_metric = "mlogloss",
+    num_class = 5,
+    
+    # Aggressive parameters for maximum correlation
+    max_depth = 10,          
+    eta = 0.02,              #y
+    subsample = 0.9,         g
+    colsample_bytree = 0.7,  
+    min_child_weight = 3,    
+    reg_alpha = 0.01,        
+    reg_lambda = 0.1,        
+    gamma = 0.01,
+    
+    seed = 42
+  )
+  
+  cat("Training model...\n")
+  
+  # Train with many rounds
+  model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 3000,          # Many rounds
+    watchlist = list(train = dtrain, val = dval),
+    early_stopping_rounds = 150,
+    verbose = 1,
+    print_every_n = 300
+  )
+  
+  # Get predictions
+  test_probs <- predict(model, dtest, reshape = TRUE)
+  colnames(test_probs) <- c("P_out", "P_single", "P_double", "P_triple", "P_home_run")
+  
+  # Calculate xwOBA
+  woba_weights_vector <- c(0.000, 0.888, 1.271, 1.616, 2.101)
+  predicted_xwoba <- as.vector(test_probs %*% woba_weights_vector)
+  
+
+  correlation <- cor(predicted_xwoba, woba_test)
+  mae <- mean(abs(predicted_xwoba - woba_test))
+  rmse <- sqrt(mean((predicted_xwoba - woba_test)^2))
+  
+  # Classification accuracy
+  pred_class <- apply(test_probs, 1, which.max) - 1
+  class_accuracy <- mean(pred_class == y_test)
+  
+  # Calibration checks
+  t_test_result <- t.test(predicted_xwoba, woba_test, paired = TRUE)
+  
+  # Brier Score
+  brier_scores <- numeric(5)
+  for(i in 1:5) {
+    actual_binary <- as.numeric(y_test == (i-1))
+    predicted_prob <- test_probs[, i]
+    brier_scores[i] <- mean((predicted_prob - actual_binary)^2)
+  }
+  overall_brier <- mean(brier_scores)
+  
+  cat("\nRESULTS:\n")
+  cat("==============================\n")
+  cat("  Correlation:", round(correlation, 4), "\n")
+  cat("  MAE:", round(mae, 4), "\n")
+  cat("  RMSE:", round(rmse, 4), "\n")
+  cat("  Classification Accuracy:", round(class_accuracy, 4), "\n")
+  cat("  t-test p-value:", round(t_test_result$p.value, 6), "\n")
+  cat("  Brier Score:", round(overall_brier, 4), "\n")
+  
+
+  # Feature importance
+  importance <- xgb.importance(model = model)
+  cat("\nTop 25 Most Important Features:\n")
+  print(head(importance, 25))
+  
+  return(list(
+    model = model,
+    correlation = correlation,
+    mae = mae,
+    rmse = rmse,
+    class_accuracy = class_accuracy,
+    t_test_p = t_test_result$p.value,
+    brier_score = overall_brier,
+    predictions = predicted_xwoba,
+    probabilities = test_probs,
+    actual = woba_test,
+    importance = importance,
+    feature_count = ncol(X_train)
+  ))
+}
+
+# ===============================
+# USAGE
+# ===============================
+
+cat("\n RUN  MODEL:\n")
+cat("=================================\n")
+cat("library(caret)\n")
+cat("library(xgboost)\n")
+cat("library(dplyr)\n")
+cat("\nraw_data <- readRDS('navs_all_data.rds')\n")
+cat("ultimate_results <- train_maximum_correlation_xwoba(raw_data)\n")
+cat("full_xwoba <- calculate_mlb_style_full_xwoba(raw_data, ultimate_results)\n")
+cat("\nTarget: 80%+ correlation with 500+ advanced features!\n")
