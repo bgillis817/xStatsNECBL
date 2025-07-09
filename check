@@ -1,243 +1,206 @@
 
-complete_xwoba_system <- function(raw_data) {
+# Read all CSV files from the Navs CSVs folder
+read_navs_csv_folder <- function(folder_path = "Navs CSVs") {
   
-  cat("COMPLETE xwOBA SYSTEM\n")
-  cat("Training: Complete TrackMan data only\n") 
-  cat("Analysis: ALL plate appearances\n")
-  cat("=====================================\n")
+  cat("READING ALL FILES FROM NAVS CSVs FOLDER\n")
+  cat("======================================\n")
   
-  # STEP 1: Train model on complete TrackMan data (your existing model)
-  cat("Step 1: Training model on complete TrackMan data...\n")
+  # Check if folder exists
+  if(!dir.exists(folder_path)) {
+    cat("Folder", folder_path, "not found. Trying current directory...\n")
+    folder_path <- "."
+  }
   
-  # This uses your existing training function - only complete TrackMan data
-  model_results <- train_maximum_correlation_xwoba(raw_data)
+  # Find all CSV files in the folder
+  csv_files <- list.files(folder_path, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
   
-  cat("Model trained. Correlation:", round(model_results$correlation, 4), "\n")
-  cat("Mean xwOBAcon:", round(mean(model_results$predictions), 3), "\n")
+  cat("Found", length(csv_files), "CSV files in", folder_path, "\n")
   
-  # STEP 2: Analyze ALL plate appearances for stats
-  cat("\nStep 2: Analyzing ALL plate appearances...\n")
+  if(length(csv_files) == 0) {
+    cat("No CSV files found. Available files:\n")
+    print(list.files(folder_path))
+    return(raw_data)
+  }
   
-  # Get EVERY PA, not just those with TrackMan data
-  all_pa <- raw_data %>%
-    filter(!is.na(Batter) & !is.na(BatterTeam)) %>%
-    mutate(
-      # Classify ALL plate appearances
-      outcome = case_when(
-        # All hits regardless of TrackMan availability
-        PlayResult == "Single" ~ "single",
-        PlayResult == "Double" ~ "double",
-        PlayResult == "Triple" ~ "triple", 
-        PlayResult %in% c("HomeRun", "Home Run") ~ "home_run",
+  # Show all files found
+  cat("CSV files found:\n")
+  for(i in 1:length(csv_files)) {
+    cat(i, ":", basename(csv_files[i]), "\n")
+  }
+  
+  # Read each CSV file
+  all_data_list <- list()
+  total_rows <- 0
+  
+  for(i in 1:length(csv_files)) {
+    file <- csv_files[i]
+    cat("\nReading:", basename(file), "...")
+    
+    tryCatch({
+      # Read CSV
+      data <- read.csv(file, stringsAsFactors = FALSE)
+      
+      # Check if it contains baseball data
+      if("Batter" %in% colnames(data) && nrow(data) > 0) {
         
-        # All outs
-        PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice", 
-                          "FieldOut", "FlyOut", "GroundOut", "PopOut", "LineOut", 
-                          "ForceOut", "Groundout", "Flyout", "Popout", "Lineout") ~ "out",
+        # Add source file info
+        data$source_file <- basename(file)
         
-        # Walks
-        KorBB == "Walk" ~ "walk",
-        PlayResult %in% c("Walk", "IntentionalWalk") ~ "walk",
-        KorBB == "IBB" ~ "intentional_walk",
+        # Check date range if Date column exists
+        if("Date" %in% colnames(data)) {
+          dates <- as.Date(data$Date)
+          if(any(!is.na(dates))) {
+            date_range <- range(dates, na.rm = TRUE)
+            cat("\n  ", nrow(data), "rows, dates:", as.character(date_range[1]), "to", as.character(date_range[2]))
+          } else {
+            cat("\n  ", nrow(data), "rows, no valid dates")
+          }
+        } else {
+          cat("\n  ", nrow(data), "rows, no Date column")
+        }
         
-        # HBP
-        PitchCall == "HitByPitch" ~ "hit_by_pitch",
-        KorBB == "HitByPitch" ~ "hit_by_pitch",
-        PlayResult == "HitByPitch" ~ "hit_by_pitch",
+        all_data_list[[length(all_data_list) + 1]] <- data
+        total_rows <- total_rows + nrow(data)
         
-        # Strikeouts
-        KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging") ~ "strikeout",
-        PlayResult %in% c("Strikeout", "StrikeoutSwinging", "StrikeoutLooking") ~ "strikeout",
-        
-        # Sacrifice flies
-        PlayResult %in% c("Sacrifice", "SacFly") ~ "sacrifice_fly",
-        
-        # Remove undefined only
-        PlayResult %in% c("Undefined", "undefined") ~ "undefined",
-        
-        TRUE ~ "other"
-      ),
+      } else {
+        cat("\n  Skipped - no Batter column or empty")
+      }
       
-      # Track which PAs have TrackMan data
-      has_trackman = !is.na(ExitSpeed) & ExitSpeed > 0 & !is.na(Angle),
-      has_partial_trackman = !is.na(ExitSpeed) | !is.na(Angle),
-      
-      # Extract year
-      Year = as.numeric(format(as.Date(Date), "%Y"))
-    ) %>%
-    filter(outcome != "undefined" & outcome != "other")
+    }, error = function(e) {
+      cat("\n  Error:", e$message)
+    })
+  }
   
-  cat("Total PAs captured:", nrow(all_pa), "\n")
-  cat("PAs with complete TrackMan:", sum(all_pa$has_trackman), "\n")
-  cat("PAs with partial TrackMan:", sum(all_pa$has_partial_trackman), "\n")
-  cat("PAs with no TrackMan:", sum(!all_pa$has_partial_trackman), "\n")
+  if(length(all_data_list) == 0) {
+    cat("\nNo valid baseball data files found\n")
+    return(raw_data)
+  }
   
-  # Show breakdown by outcome
-  cat("\nAll PA outcomes:\n")
-  print(table(all_pa$outcome))
+  cat("\n\nCombining", length(all_data_list), "files with", total_rows, "total rows...\n")
   
-  # Show by year
-  cat("\nPAs by year:\n")
-  print(table(all_pa$Year))
+  # Get all unique column names across all files
+  all_columns <- unique(unlist(lapply(all_data_list, colnames)))
+  cat("Total unique columns across all files:", length(all_columns), "\n")
   
-  # STEP 3: Calculate player stats using ALL PAs
-  cat("\nStep 3: Calculating player/team stats...\n")
+  # Standardize each dataset to have the same columns
+  standardized_data <- lapply(all_data_list, function(df) {
+    missing_cols <- setdiff(all_columns, colnames(df))
+    for(col in missing_cols) {
+      df[[col]] <- NA
+    }
+    return(df[, all_columns])
+  })
   
-  player_stats <- all_pa %>%
-    group_by(Batter, BatterTeam, Year) %>%
-    summarise(
-      # Total PAs (including those without TrackMan)
-      PA = n(),
-      
-      # All hits (regardless of TrackMan availability)
-      Singles = sum(outcome == "single", na.rm = TRUE),
-      Doubles = sum(outcome == "double", na.rm = TRUE),
-      Triples = sum(outcome == "triple", na.rm = TRUE),
-      HomeRuns = sum(outcome == "home_run", na.rm = TRUE),
-      Hits = Singles + Doubles + Triples + HomeRuns,
-      
-      # All other outcomes
-      Outs = sum(outcome == "out", na.rm = TRUE),
-      Walks = sum(outcome == "walk", na.rm = TRUE),
-      IBB = sum(outcome == "intentional_walk", na.rm = TRUE),
-      HBP = sum(outcome == "hit_by_pitch", na.rm = TRUE),
-      Strikeouts = sum(outcome == "strikeout", na.rm = TRUE),
-      SF = sum(outcome == "sacrifice_fly", na.rm = TRUE),
-      
-      # TrackMan coverage
-      PA_with_complete_TrackMan = sum(has_trackman, na.rm = TRUE),
-      PA_with_partial_TrackMan = sum(has_partial_trackman, na.rm = TRUE),
-      TrackMan_coverage = round(PA_with_complete_TrackMan / PA * 100, 1),
-      
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      # Standard calculations using ALL PAs
-      AB = Hits + Outs + Strikeouts,
-      wOBA_denominator = AB + Walks + IBB + SF + HBP,
-      
-      # Actual wOBA using ALL plate appearances
-      wOBA_numerator = (Singles * 0.888) + (Doubles * 1.271) + (Triples * 1.616) + 
-                       (HomeRuns * 2.101) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
-      actual_wOBA = ifelse(wOBA_denominator > 0, wOBA_numerator / wOBA_denominator, 0),
-      
-      # xwOBA calculation
-      # Use model's xwOBAcon for batted balls, actual weights for walks/HBP
-      BattedBalls = Hits + Outs,
-      mean_xwobacon = mean(model_results$predictions),
-      xwOBA_numerator = (mean_xwobacon * BattedBalls) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
-      xwOBA = ifelse(wOBA_denominator > 0, xwOBA_numerator / wOBA_denominator, 0),
-      
-      # Standard rates
-      AVG = ifelse(AB > 0, Hits / AB, 0),
-      OBP = ifelse(wOBA_denominator > 0, (Hits + Walks + IBB + HBP) / wOBA_denominator, 0),
-      SLG = ifelse(AB > 0, (Singles + 2*Doubles + 3*Triples + 4*HomeRuns) / AB, 0),
-      OPS = OBP + SLG,
-      
-      # Performance vs expectation
-      xwOBA_diff = xwOBA - actual_wOBA
-    ) %>%
-    filter(PA >= 5) %>%
-    arrange(desc(actual_wOBA))
+  # Combine all datasets
+  combined_data <- do.call(rbind, standardized_data)
   
-  # Team stats using ALL PAs
-  team_stats <- all_pa %>%
-    group_by(BatterTeam, Year) %>%
-    summarise(
-      PA = n(),
-      Players = n_distinct(Batter),
-      
-      Singles = sum(outcome == "single", na.rm = TRUE),
-      Doubles = sum(outcome == "double", na.rm = TRUE),
-      Triples = sum(outcome == "triple", na.rm = TRUE),
-      HomeRuns = sum(outcome == "home_run", na.rm = TRUE),
-      Hits = Singles + Doubles + Triples + HomeRuns,
-      
-      Outs = sum(outcome == "out", na.rm = TRUE),
-      Walks = sum(outcome == "walk", na.rm = TRUE),
-      IBB = sum(outcome == "intentional_walk", na.rm = TRUE),
-      HBP = sum(outcome == "hit_by_pitch", na.rm = TRUE),
-      Strikeouts = sum(outcome == "strikeout", na.rm = TRUE),
-      SF = sum(outcome == "sacrifice_fly", na.rm = TRUE),
-      
-      PA_with_complete_TrackMan = sum(has_trackman, na.rm = TRUE),
-      TrackMan_coverage = round(PA_with_complete_TrackMan / PA * 100, 1),
-      
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      AB = Hits + Outs + Strikeouts,
-      wOBA_denominator = AB + Walks + IBB + SF + HBP,
-      
-      wOBA_numerator = (Singles * 0.888) + (Doubles * 1.271) + (Triples * 1.616) + 
-                       (HomeRuns * 2.101) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
-      actual_wOBA = wOBA_numerator / wOBA_denominator,
-      
-      BattedBalls = Hits + Outs,
-      mean_xwobacon = mean(model_results$predictions),
-      xwOBA_numerator = (mean_xwobacon * BattedBalls) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
-      xwOBA = xwOBA_numerator / wOBA_denominator,
-      
-      AVG = Hits / AB,
-      OBP = (Hits + Walks + IBB + HBP) / wOBA_denominator,
-      SLG = (Singles + 2*Doubles + 3*Triples + 4*HomeRuns) / AB,
-      OPS = OBP + SLG,
-      
-      xwOBA_diff = xwOBA - actual_wOBA
-    ) %>%
-    arrange(Year, desc(actual_wOBA))
+  cat("Combined dataset:", nrow(combined_data), "rows\n")
   
-  cat("\nComplete system results:\n")
-  cat("Model correlation:", round(model_results$correlation, 4), "\n")
-  cat("Total players analyzed:", nrow(player_stats), "\n")
-  cat("Total team seasons:", nrow(team_stats), "\n")
-  cat("Total PAs analyzed:", nrow(all_pa), "\n")
+  # Remove duplicates if key columns exist
+  key_columns <- c("Batter", "Date", "Inning", "PlayResult", "ExitSpeed", "Angle")
+  available_keys <- intersect(key_columns, colnames(combined_data))
   
-  return(list(
-    model_results = model_results,
-    players_by_year = player_stats,
-    teams_by_year = team_stats,
-    all_pa_data = all_pa,
-    summary = list(
-      total_pas = nrow(all_pa),
-      pas_with_trackman = sum(all_pa$has_trackman),
-      trackman_coverage = round(sum(all_pa$has_trackman) / nrow(all_pa) * 100, 1)
-    )
-  ))
+  if(length(available_keys) >= 3) {
+    cat("Removing duplicates based on:", paste(available_keys, collapse = ", "), "\n")
+    before_dedup <- nrow(combined_data)
+    
+    combined_data <- combined_data %>%
+      distinct(across(all_of(available_keys)), .keep_all = TRUE)
+    
+    after_dedup <- nrow(combined_data)
+    cat("Removed", before_dedup - after_dedup, "duplicate rows\n")
+  }
+  
+  # Final summary
+  cat("\nFINAL DATASET SUMMARY:\n")
+  cat("Total rows:", nrow(combined_data), "\n")
+  cat("Total columns:", ncol(combined_data), "\n")
+  
+  # Check date coverage
+  if("Date" %in% colnames(combined_data)) {
+    dates <- as.Date(combined_data$Date)
+    valid_dates <- dates[!is.na(dates)]
+    
+    if(length(valid_dates) > 0) {
+      date_range <- range(valid_dates)
+      cat("Date range:", as.character(date_range[1]), "to", as.character(date_range[2]), "\n")
+      
+      # Check for recent data
+      june_15_2025 <- as.Date("2025-06-15")
+      recent_data <- sum(valid_dates >= june_15_2025)
+      cat("Rows since June 15, 2025:", recent_data, "\n")
+      
+      # Show monthly breakdown for 2025
+      if(any(valid_dates >= as.Date("2025-01-01"))) {
+        cat("\n2025 data by month:\n")
+        data_2025 <- combined_data[valid_dates >= as.Date("2025-01-01"), ]
+        dates_2025 <- as.Date(data_2025$Date)
+        monthly_counts <- table(format(dates_2025, "%Y-%m"))
+        print(monthly_counts)
+      }
+    }
+  }
+  
+  # Check team coverage
+  if("BatterTeam" %in% colnames(combined_data)) {
+    cat("\nTeams in dataset:\n")
+    team_counts <- table(combined_data$BatterTeam)
+    print(team_counts)
+  }
+  
+  return(combined_data)
 }
 
-# Run the complete system
-complete_system <- complete_xwoba_system(raw_data)
+# Read the complete dataset from Navs CSVs folder
+cat("Loading complete dataset from Navs CSVs folder...\n")
+complete_navs_data <- read_navs_csv_folder("Navs CSVs")
 
-# Display key results
-cat("\nSYSTEM SUMMARY:\n")
-cat("===============\n")
-cat("Model trained on", complete_system$summary$pas_with_trackman, "complete TrackMan PAs\n")
-cat("Analysis includes", complete_system$summary$total_pas, "total PAs\n")
-cat("TrackMan coverage:", complete_system$summary$trackman_coverage, "%\n")
+# Compare with original
+cat("\nDATASET COMPARISON:\n")
+cat("Original raw_data rows:", nrow(raw_data), "\n")
+cat("Complete Navs data rows:", nrow(complete_navs_data), "\n")
+cat("Additional rows found:", nrow(complete_navs_data) - nrow(raw_data), "\n")
 
-# Show 2025 results
-if(2025 %in% complete_system$teams_by_year$Year) {
-  cat("\n2025 TEAM RESULTS (ALL PAs):\n")
-  teams_2025 <- complete_system$teams_by_year %>%
+# Now run the complete analysis with ALL the data
+cat("\nRunning complete analysis with all Navs CSV data...\n")
+complete_system_all_data <- complete_xwoba_system(complete_navs_data)
+
+# Show improved results
+cat("\nIMPROVED RESULTS:\n")
+cat("=================\n")
+
+if(2025 %in% complete_system_all_data$teams_by_year$Year) {
+  cat("2025 TEAM RESULTS (Complete Dataset):\n")
+  teams_2025_all <- complete_system_all_data$teams_by_year %>%
     filter(Year == 2025) %>%
-    select(BatterTeam, PA, Hits, Walks, actual_wOBA, xwOBA, TrackMan_coverage)
-  print(teams_2025)
+    select(BatterTeam, PA, Hits, Walks, Strikeouts, actual_wOBA, TrackMan_coverage) %>%
+    arrange(desc(PA))
+  print(teams_2025_all)
+  
+  cat("\nTop 2025 players by PA:\n")
+  players_2025_all <- complete_system_all_data$players_by_year %>%
+    filter(Year == 2025) %>%
+    select(Batter, BatterTeam, PA, Hits, actual_wOBA) %>%
+    arrange(desc(PA)) %>%
+    head(15)
+  print(players_2025_all)
 }
 
-# Save complete results
-write.csv(complete_system$players_by_year, "complete_player_stats_all_pas.csv", row.names = FALSE)
-write.csv(complete_system$teams_by_year, "complete_team_stats_all_pas.csv", row.names = FALSE)
+# Save the complete results
+write.csv(complete_system_all_data$players_by_year, "complete_players_all_navs_data.csv", row.names = FALSE)
+write.csv(complete_system_all_data$teams_by_year, "complete_teams_all_navs_data.csv", row.names = FALSE)
 
-cat("\nResults saved with ALL plate appearances included\n")
+cat("\nComplete results saved with ALL Navs CSV data included\n")
+cat("Now you should see full PA counts for all teams!\n")
 ```
 
-This system:
+This will:
 
-1. **Trains the model** on only complete TrackMan data (maintains quality)
-1. **Analyzes ALL PAs** for player/team stats (captures everything)
-1. **Shows TrackMan coverage** for each player/team
-1. **Uses model predictions** where available, falls back to averages where not
-1. **Captures every hit, walk, strikeout** regardless of TrackMan availability
+1. **Read ALL CSV files** from the “Navs CSVs” folder
+1. **Show each file** as it processes it with row counts and date ranges
+1. **Combine everything** into one complete dataset
+1. **Remove duplicates** intelligently
+1. **Show monthly breakdown** of 2025 data
+1. **Display team PA counts** so you can see the full numbers
 
-Now you’ll get ALL your plate appearances in the analysis!​​​​​​​​​​​​​​​​
+Now you should get ALL your plate appearances, not just the subset that was in the original raw_data file!​​​​​​​​​​​​​​​​
