@@ -1,215 +1,227 @@
 
-# Create new navs_all_data.rds from all current CSVs in Navs CSVs folder
-create_updated_navs_data <- function(folder_path = "Navs CSVs") {
+# Go to Navs CSVs folder, combine all CSVs, and run complete analysis
+library(caret)
+library(xgboost)
+library(dplyr)
+
+# STEP 1: Read and combine ALL CSVs from Navs CSVs folder
+combine_navs_csvs <- function() {
   
-  cat("CREATING UPDATED navs_all_data.rds FROM ALL CURRENT CSVs\n")
-  cat("======================================================\n")
+  cat("READING ALL CSVs FROM 'Navs CSVs' FOLDER\n")
+  cat("======================================\n")
+  
+  # Set path to Navs CSVs folder
+  navs_folder <- "Navs CSVs"
   
   # Check if folder exists
-  if(!dir.exists(folder_path)) {
-    cat("Folder", folder_path, "not found. Trying current directory...\n")
-    folder_path <- "."
-  }
-  
-  # Find all CSV files
-  csv_files <- list.files(folder_path, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
-  
-  cat("Found", length(csv_files), "CSV files in", folder_path, "\n")
-  
-  if(length(csv_files) == 0) {
-    cat("No CSV files found!\n")
+  if(!dir.exists(navs_folder)) {
+    cat("ERROR: 'Navs CSVs' folder not found in current directory\n")
+    cat("Current directory contents:\n")
+    print(list.files())
     return(NULL)
   }
   
-  # Show all files that will be included
-  cat("\nFiles to be included:\n")
+  # Get all CSV files from the folder
+  csv_files <- list.files(navs_folder, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
+  
+  cat("Found", length(csv_files), "CSV files in Navs CSVs folder\n")
+  
+  if(length(csv_files) == 0) {
+    cat("No CSV files found in Navs CSVs folder\n")
+    return(NULL)
+  }
+  
+  # Show files that will be processed
+  cat("\nCSV files to be combined:\n")
   for(i in 1:length(csv_files)) {
-    cat(i, ":", basename(csv_files[i]), "\n")
+    cat(sprintf("%2d: %s\n", i, basename(csv_files[i])))
   }
   
   # Read and combine all CSV files
-  all_data_list <- list()
-  file_summary <- data.frame()
+  all_data <- list()
   
   for(i in 1:length(csv_files)) {
-    file <- csv_files[i]
-    filename <- basename(file)
+    file_path <- csv_files[i]
+    file_name <- basename(file_path)
+    
+    cat(sprintf("\nReading file %d/%d: %s", i, length(csv_files), file_name))
     
     tryCatch({
-      cat("\nProcessing:", filename, "...")
-      
-      # Read CSV
-      data <- read.csv(file, stringsAsFactors = FALSE)
+      # Read the CSV
+      data <- read.csv(file_path, stringsAsFactors = FALSE)
       
       # Add source tracking
-      data$source_file <- filename
-      data$file_number <- i
+      data$source_csv <- file_name
       
-      # Check data quality
-      total_rows <- nrow(data)
-      has_batter <- sum(!is.na(data$Batter) & data$Batter != "")
-      has_play_result <- sum(!is.na(data$PlayResult) & data$PlayResult != "")
+      # Basic info
+      cat(sprintf(" - %d rows", nrow(data)))
       
-      cat(" ", total_rows, "rows,", has_batter, "with batter,", has_play_result, "with PlayResult")
+      # Check for key columns
+      if("Batter" %in% colnames(data)) {
+        batter_count <- sum(!is.na(data$Batter) & data$Batter != "")
+        cat(sprintf(", %d with batters", batter_count))
+      }
       
       # Check date range
-      date_info <- "No dates"
-      if("Date" %in% colnames(data) && any(!is.na(data$Date))) {
+      if("Date" %in% colnames(data)) {
         dates <- as.Date(data$Date)
         valid_dates <- dates[!is.na(dates)]
         if(length(valid_dates) > 0) {
           date_range <- range(valid_dates)
-          date_info <- paste(as.character(date_range[1]), "to", as.character(date_range[2]))
-          cat(" (", date_info, ")")
+          cat(sprintf(", dates: %s to %s", date_range[1], date_range[2]))
         }
       }
       
-      # Include if it has baseball data
-      if(total_rows > 0 && has_batter > 0) {
-        all_data_list[[length(all_data_list) + 1]] <- data
-        
-        # Track summary
-        file_summary <- rbind(file_summary, data.frame(
-          file = filename,
-          rows = total_rows,
-          batters = has_batter,
-          play_results = has_play_result,
-          dates = date_info,
-          stringsAsFactors = FALSE
-        ))
-        
-        cat(" -> INCLUDED")
+      # Add to list if it has data
+      if(nrow(data) > 0) {
+        all_data[[length(all_data) + 1]] <- data
+        cat(" ✓")
       } else {
-        cat(" -> SKIPPED")
+        cat(" (empty)")
       }
       
     }, error = function(e) {
-      cat(" ERROR:", e$message)
+      cat(sprintf(" ERROR: %s", e$message))
     })
   }
   
-  cat("\n\nFILE SUMMARY:\n")
-  print(file_summary)
-  
-  if(length(all_data_list) == 0) {
-    cat("No valid data files found!\n")
+  if(length(all_data) == 0) {
+    cat("\nNo valid data found in any CSV files\n")
     return(NULL)
   }
   
-  cat("\nCombining", length(all_data_list), "files...\n")
+  cat(sprintf("\n\nCombining %d CSV files...\n", length(all_data)))
   
-  # Get all unique column names
-  all_columns <- unique(unlist(lapply(all_data_list, colnames)))
-  cat("Total unique columns:", length(all_columns), "\n")
+  # Get all unique column names across all files
+  all_columns <- unique(unlist(lapply(all_data, colnames)))
+  cat("Total unique columns across all files:", length(all_columns), "\n")
   
-  # Standardize all datasets to have same columns
-  standardized_data <- lapply(all_data_list, function(df) {
+  # Standardize each dataset to have all columns
+  cat("Standardizing column structure...\n")
+  standardized_data <- lapply(all_data, function(df) {
+    # Add missing columns with NA
     missing_cols <- setdiff(all_columns, colnames(df))
     for(col in missing_cols) {
       df[[col]] <- NA
     }
+    # Return with consistent column order
     return(df[, all_columns])
   })
   
   # Combine all data
+  cat("Binding all data together...\n")
   combined_data <- do.call(rbind, standardized_data)
   
-  cat("Combined dataset:", nrow(combined_data), "rows\n")
-  
-  # Final data summary
-  cat("\nFINAL DATASET SUMMARY:\n")
+  cat("COMBINED DATASET SUMMARY:\n")
+  cat("========================\n")
   cat("Total rows:", nrow(combined_data), "\n")
   cat("Total columns:", ncol(combined_data), "\n")
+  cat("CSV files combined:", length(all_data), "\n")
   
-  # Date coverage
+  # Check data quality
+  if("Batter" %in% colnames(combined_data)) {
+    total_batters <- sum(!is.na(combined_data$Batter) & combined_data$Batter != "")
+    cat("Rows with batters:", total_batters, "\n")
+  }
+  
   if("Date" %in% colnames(combined_data)) {
     dates <- as.Date(combined_data$Date)
     valid_dates <- dates[!is.na(dates)]
     if(length(valid_dates) > 0) {
-      cat("Date range:", as.character(range(valid_dates)), "\n")
+      date_range <- range(valid_dates)
+      cat("Date range:", as.character(date_range[1]), "to", as.character(date_range[2]), "\n")
       
-      # Show 2025 coverage
+      # Show 2025 data specifically
       dates_2025 <- valid_dates[valid_dates >= as.Date("2025-01-01")]
       if(length(dates_2025) > 0) {
-        cat("2025 data:", length(dates_2025), "rows\n")
-        
-        # Monthly breakdown for 2025
-        monthly_2025 <- table(format(dates_2025, "%Y-%m"))
-        cat("2025 by month:\n")
-        print(monthly_2025)
+        cat("2025 data points:", length(dates_2025), "\n")
       }
     }
   }
   
-  # Team coverage
   if("BatterTeam" %in% colnames(combined_data)) {
-    cat("\nTeam coverage:\n")
-    team_counts <- table(combined_data$BatterTeam, useNA = "always")
-    print(team_counts)
+    teams <- table(combined_data$BatterTeam, useNA = "always")
+    cat("Teams found:", length(teams), "\n")
+    cat("Team breakdown:\n")
+    print(teams)
   }
-  
-  # Save the new file
-  cat("\nSaving updated navs_all_data.rds...\n")
-  saveRDS(combined_data, "navs_all_data.rds")
-  cat("✅ navs_all_data.rds updated successfully!\n")
   
   return(combined_data)
 }
 
-# Create the updated dataset
-cat("STEP 1: Creating updated navs_all_data.rds from all current CSVs\n")
-updated_navs_data <- create_updated_navs_data("Navs CSVs")
-
-if(is.null(updated_navs_data)) {
-  cat("Failed to create updated dataset. Using existing raw_data.\n")
-  updated_navs_data <- raw_data
-}
-
-# Now use this updated dataset for the complete analysis
-cat("\nSTEP 2: Running complete xwOBA system with updated dataset\n")
-
-# Replace raw_data with the updated version
-raw_data <- updated_navs_data
-
-# Run the complete system
-complete_system_updated <- complete_xwoba_system(updated_navs_data)
-
-# Show the improvement
-cat("\nUPDATED SYSTEM RESULTS:\n")
-cat("======================\n")
-cat("Total PAs in updated dataset:", complete_system_updated$summary$total_pas, "\n")
-cat("TrackMan coverage:", complete_system_updated$summary$trackman_coverage, "%\n")
-cat("Model correlation:", round(complete_system_updated$model_results$correlation, 4), "\n")
-
-# Show 2025 results with updated data
-if(2025 %in% complete_system_updated$teams_by_year$Year) {
-  cat("\n2025 TEAM RESULTS (Updated Dataset):\n")
-  teams_2025_updated <- complete_system_updated$teams_by_year %>%
-    filter(Year == 2025) %>%
-    select(BatterTeam, PA, Hits, Walks, Strikeouts, actual_wOBA, TrackMan_coverage) %>%
-    arrange(desc(PA))
-  print(teams_2025_updated)
+# STEP 2: Run complete analysis with the new combined dataset
+run_complete_analysis <- function(combined_data) {
   
-  cat("\nTop 2025 players by PA (Updated Dataset):\n")
-  players_2025_updated <- complete_system_updated$players_by_year %>%
-    filter(Year == 2025) %>%
-    select(Batter, BatterTeam, PA, Hits, actual_wOBA) %>%
-    arrange(desc(PA)) %>%
-    head(15)
-  print(players_2025_updated)
+  cat("\nRUNNING COMPLETE xwOBA ANALYSIS\n")
+  cat("==============================\n")
+  
+  if(is.null(combined_data)) {
+    cat("No data provided for analysis\n")
+    return(NULL)
+  }
+  
+  # Use the combined data as our new raw_data
+  raw_data <<- combined_data  # Update global raw_data
+  
+  # Run the ultimate correlation model
+  cat("Training xwOBA model...\n")
+  ultimate_results <- train_maximum_correlation_xwoba(combined_data)
+  
+  # Calculate full xwOBA
+  cat("Calculating full xwOBA...\n")
+  full_xwoba_result <- calculate_full_xwoba(combined_data, ultimate_results)
+  
+  # Player and team analysis
+  cat("Calculating player and team statistics...\n")
+  player_team_results <- calculate_player_team_xwoba_inclusive(combined_data, ultimate_results)
+  
+  # Summary results
+  cat("\nANALYSIS COMPLETE!\n")
+  cat("=================\n")
+  cat("Model correlation:", round(ultimate_results$correlation, 4), "\n")
+  cat("Mean xwOBAcon:", round(mean(ultimate_results$predictions), 3), "\n")
+  cat("Full xwOBA:", round(full_xwoba_result, 3), "\n")
+  cat("Total PAs analyzed:", player_team_results$total_pa_captured, "\n")
+  
+  return(list(
+    model_results = ultimate_results,
+    full_xwoba = full_xwoba_result,
+    player_team_stats = player_team_results,
+    combined_data = combined_data
+  ))
 }
 
-# Save updated results
-write.csv(complete_system_updated$players_by_year, "players_updated_dataset.csv", row.names = FALSE)
-write.csv(complete_system_updated$teams_by_year, "teams_updated_dataset.csv", row.names = FALSE)
+# EXECUTE THE COMPLETE PROCESS
+cat("STARTING COMPLETE PROCESS: COMBINE CSVs + RUN ANALYSIS\n")
+cat("=====================================================\n")
 
-cat("\n✅ COMPLETE! Updated navs_all_data.rds created and analysis run\n")
-cat("📁 Results saved to players_updated_dataset.csv and teams_updated_dataset.csv\n")
-cat("🎯 Model correlation:", round(complete_system_updated$model_results$correlation, 4), "\n")
-cat("📊 Mean xwOBAcon:", round(mean(complete_system_updated$model_results$predictions), 3), "\n")
+# Step 1: Combine all CSVs from Navs CSVs folder
+combined_navs_data <- combine_navs_csvs()
 
-# Quick verification
-cat("\nQUICK VERIFICATION:\n")
-cat("Files used:", length(unique(updated_navs_data$source_file)), "\n")
-cat("Date range:", as.character(range(as.Date(updated_navs_data$Date), na.rm = TRUE)), "\n")
-cat("Total rows in new navs_all_data.rds:", nrow(updated_navs_data), "\n")
+if(is.null(combined_navs_data)) {
+  cat("Failed to combine CSV data. Exiting.\n")
+} else {
+  # Step 2: Run complete analysis
+  analysis_results <- run_complete_analysis(combined_navs_data)
+  
+  if(!is.null(analysis_results)) {
+    # Show 2025 results
+    if(2025 %in% analysis_results$player_team_stats$teams_by_year$Year) {
+      cat("\n2025 TEAM RESULTS:\n")
+      teams_2025 <- analysis_results$player_team_stats$teams_by_year %>%
+        filter(Year == 2025) %>%
+        select(BatterTeam, PA, Hits, Walks, actual_wOBA) %>%
+        arrange(desc(PA))
+      print(teams_2025)
+    }
+    
+    # Save results
+    write.csv(analysis_results$player_team_stats$players_by_year, "players_from_navs_csvs.csv", row.names = FALSE)
+    write.csv(analysis_results$player_team_stats$teams_by_year, "teams_from_navs_csvs.csv", row.names = FALSE)
+    
+    cat("\n✅ PROCESS COMPLETE!\n")
+    cat("📁 Results saved to CSV files\n")
+    cat("📊 New dataset contains", nrow(combined_navs_data), "total rows\n")
+    cat("🎯 Model correlation:", round(analysis_results$model_results$correlation, 4), "\n")
+  }
+} 
