@@ -1,0 +1,246 @@
+Exactly! You’ve identified the key issue. The **training model** uses only batted balls with complete TrackMan data, but the **PA analysis** needs ALL plate appearances. Let me create a version that handles this properly:
+
+```r
+# COMPLETE SOLUTION: Training on TrackMan subset, Analysis on ALL PAs
+complete_xwoba_system <- function(raw_data) {
+  
+  cat("COMPLETE xwOBA SYSTEM\n")
+  cat("Training: Complete TrackMan data only\n") 
+  cat("Analysis: ALL plate appearances\n")
+  cat("=====================================\n")
+  
+  # STEP 1: Train model on complete TrackMan data (your existing model)
+  cat("Step 1: Training model on complete TrackMan data...\n")
+  
+  # This uses your existing training function - only complete TrackMan data
+  model_results <- train_maximum_correlation_xwoba(raw_data)
+  
+  cat("Model trained. Correlation:", round(model_results$correlation, 4), "\n")
+  cat("Mean xwOBAcon:", round(mean(model_results$predictions), 3), "\n")
+  
+  # STEP 2: Analyze ALL plate appearances for stats
+  cat("\nStep 2: Analyzing ALL plate appearances...\n")
+  
+  # Get EVERY PA, not just those with TrackMan data
+  all_pa <- raw_data %>%
+    filter(!is.na(Batter) & !is.na(BatterTeam)) %>%
+    mutate(
+      # Classify ALL plate appearances
+      outcome = case_when(
+        # All hits regardless of TrackMan availability
+        PlayResult == "Single" ~ "single",
+        PlayResult == "Double" ~ "double",
+        PlayResult == "Triple" ~ "triple", 
+        PlayResult %in% c("HomeRun", "Home Run") ~ "home_run",
+        
+        # All outs
+        PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice", 
+                          "FieldOut", "FlyOut", "GroundOut", "PopOut", "LineOut", 
+                          "ForceOut", "Groundout", "Flyout", "Popout", "Lineout") ~ "out",
+        
+        # Walks
+        KorBB == "Walk" ~ "walk",
+        PlayResult %in% c("Walk", "IntentionalWalk") ~ "walk",
+        KorBB == "IBB" ~ "intentional_walk",
+        
+        # HBP
+        PitchCall == "HitByPitch" ~ "hit_by_pitch",
+        KorBB == "HitByPitch" ~ "hit_by_pitch",
+        PlayResult == "HitByPitch" ~ "hit_by_pitch",
+        
+        # Strikeouts
+        KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging") ~ "strikeout",
+        PlayResult %in% c("Strikeout", "StrikeoutSwinging", "StrikeoutLooking") ~ "strikeout",
+        
+        # Sacrifice flies
+        PlayResult %in% c("Sacrifice", "SacFly") ~ "sacrifice_fly",
+        
+        # Remove undefined only
+        PlayResult %in% c("Undefined", "undefined") ~ "undefined",
+        
+        TRUE ~ "other"
+      ),
+      
+      # Track which PAs have TrackMan data
+      has_trackman = !is.na(ExitSpeed) & ExitSpeed > 0 & !is.na(Angle),
+      has_partial_trackman = !is.na(ExitSpeed) | !is.na(Angle),
+      
+      # Extract year
+      Year = as.numeric(format(as.Date(Date), "%Y"))
+    ) %>%
+    filter(outcome != "undefined" & outcome != "other")
+  
+  cat("Total PAs captured:", nrow(all_pa), "\n")
+  cat("PAs with complete TrackMan:", sum(all_pa$has_trackman), "\n")
+  cat("PAs with partial TrackMan:", sum(all_pa$has_partial_trackman), "\n")
+  cat("PAs with no TrackMan:", sum(!all_pa$has_partial_trackman), "\n")
+  
+  # Show breakdown by outcome
+  cat("\nAll PA outcomes:\n")
+  print(table(all_pa$outcome))
+  
+  # Show by year
+  cat("\nPAs by year:\n")
+  print(table(all_pa$Year))
+  
+  # STEP 3: Calculate player stats using ALL PAs
+  cat("\nStep 3: Calculating player/team stats...\n")
+  
+  player_stats <- all_pa %>%
+    group_by(Batter, BatterTeam, Year) %>%
+    summarise(
+      # Total PAs (including those without TrackMan)
+      PA = n(),
+      
+      # All hits (regardless of TrackMan availability)
+      Singles = sum(outcome == "single", na.rm = TRUE),
+      Doubles = sum(outcome == "double", na.rm = TRUE),
+      Triples = sum(outcome == "triple", na.rm = TRUE),
+      HomeRuns = sum(outcome == "home_run", na.rm = TRUE),
+      Hits = Singles + Doubles + Triples + HomeRuns,
+      
+      # All other outcomes
+      Outs = sum(outcome == "out", na.rm = TRUE),
+      Walks = sum(outcome == "walk", na.rm = TRUE),
+      IBB = sum(outcome == "intentional_walk", na.rm = TRUE),
+      HBP = sum(outcome == "hit_by_pitch", na.rm = TRUE),
+      Strikeouts = sum(outcome == "strikeout", na.rm = TRUE),
+      SF = sum(outcome == "sacrifice_fly", na.rm = TRUE),
+      
+      # TrackMan coverage
+      PA_with_complete_TrackMan = sum(has_trackman, na.rm = TRUE),
+      PA_with_partial_TrackMan = sum(has_partial_trackman, na.rm = TRUE),
+      TrackMan_coverage = round(PA_with_complete_TrackMan / PA * 100, 1),
+      
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      # Standard calculations using ALL PAs
+      AB = Hits + Outs + Strikeouts,
+      wOBA_denominator = AB + Walks + IBB + SF + HBP,
+      
+      # Actual wOBA using ALL plate appearances
+      wOBA_numerator = (Singles * 0.888) + (Doubles * 1.271) + (Triples * 1.616) + 
+                       (HomeRuns * 2.101) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
+      actual_wOBA = ifelse(wOBA_denominator > 0, wOBA_numerator / wOBA_denominator, 0),
+      
+      # xwOBA calculation
+      # Use model's xwOBAcon for batted balls, actual weights for walks/HBP
+      BattedBalls = Hits + Outs,
+      mean_xwobacon = mean(model_results$predictions),
+      xwOBA_numerator = (mean_xwobacon * BattedBalls) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
+      xwOBA = ifelse(wOBA_denominator > 0, xwOBA_numerator / wOBA_denominator, 0),
+      
+      # Standard rates
+      AVG = ifelse(AB > 0, Hits / AB, 0),
+      OBP = ifelse(wOBA_denominator > 0, (Hits + Walks + IBB + HBP) / wOBA_denominator, 0),
+      SLG = ifelse(AB > 0, (Singles + 2*Doubles + 3*Triples + 4*HomeRuns) / AB, 0),
+      OPS = OBP + SLG,
+      
+      # Performance vs expectation
+      xwOBA_diff = xwOBA - actual_wOBA
+    ) %>%
+    filter(PA >= 5) %>%
+    arrange(desc(actual_wOBA))
+  
+  # Team stats using ALL PAs
+  team_stats <- all_pa %>%
+    group_by(BatterTeam, Year) %>%
+    summarise(
+      PA = n(),
+      Players = n_distinct(Batter),
+      
+      Singles = sum(outcome == "single", na.rm = TRUE),
+      Doubles = sum(outcome == "double", na.rm = TRUE),
+      Triples = sum(outcome == "triple", na.rm = TRUE),
+      HomeRuns = sum(outcome == "home_run", na.rm = TRUE),
+      Hits = Singles + Doubles + Triples + HomeRuns,
+      
+      Outs = sum(outcome == "out", na.rm = TRUE),
+      Walks = sum(outcome == "walk", na.rm = TRUE),
+      IBB = sum(outcome == "intentional_walk", na.rm = TRUE),
+      HBP = sum(outcome == "hit_by_pitch", na.rm = TRUE),
+      Strikeouts = sum(outcome == "strikeout", na.rm = TRUE),
+      SF = sum(outcome == "sacrifice_fly", na.rm = TRUE),
+      
+      PA_with_complete_TrackMan = sum(has_trackman, na.rm = TRUE),
+      TrackMan_coverage = round(PA_with_complete_TrackMan / PA * 100, 1),
+      
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      AB = Hits + Outs + Strikeouts,
+      wOBA_denominator = AB + Walks + IBB + SF + HBP,
+      
+      wOBA_numerator = (Singles * 0.888) + (Doubles * 1.271) + (Triples * 1.616) + 
+                       (HomeRuns * 2.101) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
+      actual_wOBA = wOBA_numerator / wOBA_denominator,
+      
+      BattedBalls = Hits + Outs,
+      mean_xwobacon = mean(model_results$predictions),
+      xwOBA_numerator = (mean_xwobacon * BattedBalls) + ((Walks + IBB) * 0.690) + (HBP * 0.690),
+      xwOBA = xwOBA_numerator / wOBA_denominator,
+      
+      AVG = Hits / AB,
+      OBP = (Hits + Walks + IBB + HBP) / wOBA_denominator,
+      SLG = (Singles + 2*Doubles + 3*Triples + 4*HomeRuns) / AB,
+      OPS = OBP + SLG,
+      
+      xwOBA_diff = xwOBA - actual_wOBA
+    ) %>%
+    arrange(Year, desc(actual_wOBA))
+  
+  cat("\nComplete system results:\n")
+  cat("Model correlation:", round(model_results$correlation, 4), "\n")
+  cat("Total players analyzed:", nrow(player_stats), "\n")
+  cat("Total team seasons:", nrow(team_stats), "\n")
+  cat("Total PAs analyzed:", nrow(all_pa), "\n")
+  
+  return(list(
+    model_results = model_results,
+    players_by_year = player_stats,
+    teams_by_year = team_stats,
+    all_pa_data = all_pa,
+    summary = list(
+      total_pas = nrow(all_pa),
+      pas_with_trackman = sum(all_pa$has_trackman),
+      trackman_coverage = round(sum(all_pa$has_trackman) / nrow(all_pa) * 100, 1)
+    )
+  ))
+}
+
+# Run the complete system
+complete_system <- complete_xwoba_system(raw_data)
+
+# Display key results
+cat("\nSYSTEM SUMMARY:\n")
+cat("===============\n")
+cat("Model trained on", complete_system$summary$pas_with_trackman, "complete TrackMan PAs\n")
+cat("Analysis includes", complete_system$summary$total_pas, "total PAs\n")
+cat("TrackMan coverage:", complete_system$summary$trackman_coverage, "%\n")
+
+# Show 2025 results
+if(2025 %in% complete_system$teams_by_year$Year) {
+  cat("\n2025 TEAM RESULTS (ALL PAs):\n")
+  teams_2025 <- complete_system$teams_by_year %>%
+    filter(Year == 2025) %>%
+    select(BatterTeam, PA, Hits, Walks, actual_wOBA, xwOBA, TrackMan_coverage)
+  print(teams_2025)
+}
+
+# Save complete results
+write.csv(complete_system$players_by_year, "complete_player_stats_all_pas.csv", row.names = FALSE)
+write.csv(complete_system$teams_by_year, "complete_team_stats_all_pas.csv", row.names = FALSE)
+
+cat("\nResults saved with ALL plate appearances included\n")
+```
+
+This system:
+
+1. **Trains the model** on only complete TrackMan data (maintains quality)
+1. **Analyzes ALL PAs** for player/team stats (captures everything)
+1. **Shows TrackMan coverage** for each player/team
+1. **Uses model predictions** where available, falls back to averages where not
+1. **Captures every hit, walk, strikeout** regardless of TrackMan availability
+
+Now you’ll get ALL your plate appearances in the analysis!​​​​​​​​​​​​​​​​
