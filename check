@@ -1,7 +1,4 @@
-Exactly! You’ve identified the key issue. The **training model** uses only batted balls with complete TrackMan data, but the **PA analysis** needs ALL plate appearances. Let me create a version that handles this properly:
 
-```r
-# COMPLETE SOLUTION: Training on TrackMan subset, Analysis on ALL PAs
 complete_xwoba_system <- function(raw_data) {
   
   cat("COMPLETE xwOBA SYSTEM\n")
