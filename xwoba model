@@ -1,4 +1,3 @@
-```r
 # Complete xwOBA Model - All Code in One Block
 # Load required libraries
 library(caret)
