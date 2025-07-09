@@ -1,9 +1,11 @@
+You’re absolutely right! We shouldn’t remove duplicates - every PA from every game should be included. Let me fix this and also add debugging to see why some PAs might be missing:
 
-# Read all CSV files from the Navs CSVs folder
-read_navs_csv_folder <- function(folder_path = "Navs CSVs") {
+```r
+# Read all CSV files from Navs CSVs folder - KEEP ALL PAs
+read_all_navs_pas <- function(folder_path = "Navs CSVs") {
   
-  cat("READING ALL FILES FROM NAVS CSVs FOLDER\n")
-  cat("======================================\n")
+  cat("READING ALL PAs FROM NAVS CSVs FOLDER (NO DUPLICATES REMOVED)\n")
+  cat("============================================================\n")
   
   # Check if folder exists
   if(!dir.exists(folder_path)) {
@@ -11,10 +13,10 @@ read_navs_csv_folder <- function(folder_path = "Navs CSVs") {
     folder_path <- "."
   }
   
-  # Find all CSV files in the folder
+  # Find all CSV files
   csv_files <- list.files(folder_path, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
   
-  cat("Found", length(csv_files), "CSV files in", folder_path, "\n")
+  cat("Found", length(csv_files), "CSV files\n")
   
   if(length(csv_files) == 0) {
     cat("No CSV files found. Available files:\n")
@@ -22,67 +24,91 @@ read_navs_csv_folder <- function(folder_path = "Navs CSVs") {
     return(raw_data)
   }
   
-  # Show all files found
-  cat("CSV files found:\n")
-  for(i in 1:length(csv_files)) {
-    cat(i, ":", basename(csv_files[i]), "\n")
-  }
-  
-  # Read each CSV file
+  # Read each file and keep ALL rows
   all_data_list <- list()
-  total_rows <- 0
+  file_summaries <- data.frame()
   
   for(i in 1:length(csv_files)) {
     file <- csv_files[i]
-    cat("\nReading:", basename(file), "...")
+    filename <- basename(file)
     
     tryCatch({
+      cat("\nReading:", filename, "...")
+      
       # Read CSV
       data <- read.csv(file, stringsAsFactors = FALSE)
       
-      # Check if it contains baseball data
-      if("Batter" %in% colnames(data) && nrow(data) > 0) {
-        
-        # Add source file info
-        data$source_file <- basename(file)
-        
-        # Check date range if Date column exists
-        if("Date" %in% colnames(data)) {
-          dates <- as.Date(data$Date)
-          if(any(!is.na(dates))) {
-            date_range <- range(dates, na.rm = TRUE)
-            cat("\n  ", nrow(data), "rows, dates:", as.character(date_range[1]), "to", as.character(date_range[2]))
-          } else {
-            cat("\n  ", nrow(data), "rows, no valid dates")
-          }
-        } else {
-          cat("\n  ", nrow(data), "rows, no Date column")
+      # Add source file info
+      data$source_file <- filename
+      
+      # Count total rows and rows with batters
+      total_rows <- nrow(data)
+      batter_rows <- sum(!is.na(data$Batter) & data$Batter != "")
+      
+      # Check for PA indicators
+      has_play_result <- sum(!is.na(data$PlayResult) & data$PlayResult != "")
+      has_korbb <- sum(!is.na(data$KorBB) & data$KorBB != "")
+      potential_pas <- max(has_play_result, has_korbb, batter_rows)
+      
+      cat("\n  Total rows:", total_rows)
+      cat("\n  Rows with Batter:", batter_rows)
+      cat("\n  Rows with PlayResult:", has_play_result)
+      cat("\n  Rows with KorBB:", has_korbb)
+      cat("\n  Potential PAs:", potential_pas)
+      
+      # Check date range
+      date_info <- "No dates"
+      if("Date" %in% colnames(data)) {
+        dates <- as.Date(data$Date)
+        valid_dates <- dates[!is.na(dates)]
+        if(length(valid_dates) > 0) {
+          date_range <- range(valid_dates)
+          date_info <- paste(as.character(date_range[1]), "to", as.character(date_range[2]))
+          cat("\n  Date range:", date_info)
         }
-        
+      }
+      
+      # Always include the file if it has any baseball-looking data
+      if(total_rows > 0 && ("Batter" %in% colnames(data) || "PlayResult" %in% colnames(data))) {
         all_data_list[[length(all_data_list) + 1]] <- data
-        total_rows <- total_rows + nrow(data)
         
+        # Track file summary
+        file_summaries <- rbind(file_summaries, data.frame(
+          file = filename,
+          total_rows = total_rows,
+          batter_rows = batter_rows,
+          potential_pas = potential_pas,
+          date_range = date_info,
+          stringsAsFactors = FALSE
+        ))
+        
+        cat(" -> INCLUDED")
       } else {
-        cat("\n  Skipped - no Batter column or empty")
+        cat(" -> SKIPPED (no baseball data)")
       }
       
     }, error = function(e) {
-      cat("\n  Error:", e$message)
+      cat("\n  ERROR reading", filename, ":", e$message)
     })
   }
   
   if(length(all_data_list) == 0) {
-    cat("\nNo valid baseball data files found\n")
+    cat("\nNo valid files found\n")
     return(raw_data)
   }
   
-  cat("\n\nCombining", length(all_data_list), "files with", total_rows, "total rows...\n")
+  cat("\n\nFILE SUMMARY:\n")
+  print(file_summaries)
+  cat("Total potential PAs across all files:", sum(file_summaries$potential_pas), "\n")
   
-  # Get all unique column names across all files
+  # Combine all data - DON'T remove any rows
+  cat("\nCombining all data (keeping every row)...\n")
+  
+  # Get all column names
   all_columns <- unique(unlist(lapply(all_data_list, colnames)))
-  cat("Total unique columns across all files:", length(all_columns), "\n")
+  cat("Total columns across all files:", length(all_columns), "\n")
   
-  # Standardize each dataset to have the same columns
+  # Standardize columns but keep ALL rows
   standardized_data <- lapply(all_data_list, function(df) {
     missing_cols <- setdiff(all_columns, colnames(df))
     for(col in missing_cols) {
@@ -91,116 +117,151 @@ read_navs_csv_folder <- function(folder_path = "Navs CSVs") {
     return(df[, all_columns])
   })
   
-  # Combine all datasets
+  # Combine everything - KEEP ALL ROWS
   combined_data <- do.call(rbind, standardized_data)
   
-  cat("Combined dataset:", nrow(combined_data), "rows\n")
+  cat("Combined dataset (ALL ROWS):", nrow(combined_data), "rows\n")
   
-  # Remove duplicates if key columns exist
-  key_columns <- c("Batter", "Date", "Inning", "PlayResult", "ExitSpeed", "Angle")
-  available_keys <- intersect(key_columns, colnames(combined_data))
+  # Debug PA detection
+  cat("\nDEBUGGING PA DETECTION:\n")
+  cat("======================\n")
   
-  if(length(available_keys) >= 3) {
-    cat("Removing duplicates based on:", paste(available_keys, collapse = ", "), "\n")
-    before_dedup <- nrow(combined_data)
-    
-    combined_data <- combined_data %>%
-      distinct(across(all_of(available_keys)), .keep_all = TRUE)
-    
-    after_dedup <- nrow(combined_data)
-    cat("Removed", before_dedup - after_dedup, "duplicate rows\n")
+  # Check what we have for PA identification
+  cat("Rows with Batter:", sum(!is.na(combined_data$Batter) & combined_data$Batter != ""), "\n")
+  cat("Rows with PlayResult:", sum(!is.na(combined_data$PlayResult) & combined_data$PlayResult != ""), "\n")
+  cat("Rows with KorBB:", sum(!is.na(combined_data$KorBB) & combined_data$KorBB != ""), "\n")
+  
+  # Show unique PlayResult values
+  if("PlayResult" %in% colnames(combined_data)) {
+    cat("\nUnique PlayResult values:\n")
+    play_results <- table(combined_data$PlayResult, useNA = "always")
+    print(play_results)
   }
   
-  # Final summary
-  cat("\nFINAL DATASET SUMMARY:\n")
-  cat("Total rows:", nrow(combined_data), "\n")
-  cat("Total columns:", ncol(combined_data), "\n")
+  # Show unique KorBB values
+  if("KorBB" %in% colnames(combined_data)) {
+    cat("\nUnique KorBB values:\n")
+    korbb_values <- table(combined_data$KorBB, useNA = "always")
+    print(korbb_values)
+  }
   
-  # Check date coverage
+  # Check team distribution
+  if("BatterTeam" %in% colnames(combined_data)) {
+    cat("\nRows by team:\n")
+    team_counts <- table(combined_data$BatterTeam, useNA = "always")
+    print(team_counts)
+  }
+  
+  # Check date distribution
   if("Date" %in% colnames(combined_data)) {
     dates <- as.Date(combined_data$Date)
     valid_dates <- dates[!is.na(dates)]
     
     if(length(valid_dates) > 0) {
-      date_range <- range(valid_dates)
-      cat("Date range:", as.character(date_range[1]), "to", as.character(date_range[2]), "\n")
+      cat("\nDate range in combined data:", as.character(range(valid_dates)), "\n")
       
-      # Check for recent data
-      june_15_2025 <- as.Date("2025-06-15")
-      recent_data <- sum(valid_dates >= june_15_2025)
-      cat("Rows since June 15, 2025:", recent_data, "\n")
-      
-      # Show monthly breakdown for 2025
-      if(any(valid_dates >= as.Date("2025-01-01"))) {
-        cat("\n2025 data by month:\n")
-        data_2025 <- combined_data[valid_dates >= as.Date("2025-01-01"), ]
-        dates_2025 <- as.Date(data_2025$Date)
-        monthly_counts <- table(format(dates_2025, "%Y-%m"))
-        print(monthly_counts)
+      # 2025 breakdown
+      dates_2025 <- valid_dates[valid_dates >= as.Date("2025-01-01")]
+      if(length(dates_2025) > 0) {
+        cat("2025 data:", length(dates_2025), "rows\n")
+        cat("2025 monthly breakdown:\n")
+        monthly_2025 <- table(format(dates_2025, "%Y-%m"))
+        print(monthly_2025)
       }
     }
-  }
-  
-  # Check team coverage
-  if("BatterTeam" %in% colnames(combined_data)) {
-    cat("\nTeams in dataset:\n")
-    team_counts <- table(combined_data$BatterTeam)
-    print(team_counts)
   }
   
   return(combined_data)
 }
 
-# Read the complete dataset from Navs CSVs folder
-cat("Loading complete dataset from Navs CSVs folder...\n")
-complete_navs_data <- read_navs_csv_folder("Navs CSVs")
-
-# Compare with original
-cat("\nDATASET COMPARISON:\n")
-cat("Original raw_data rows:", nrow(raw_data), "\n")
-cat("Complete Navs data rows:", nrow(complete_navs_data), "\n")
-cat("Additional rows found:", nrow(complete_navs_data) - nrow(raw_data), "\n")
-
-# Now run the complete analysis with ALL the data
-cat("\nRunning complete analysis with all Navs CSV data...\n")
-complete_system_all_data <- complete_xwoba_system(complete_navs_data)
-
-# Show improved results
-cat("\nIMPROVED RESULTS:\n")
-cat("=================\n")
-
-if(2025 %in% complete_system_all_data$teams_by_year$Year) {
-  cat("2025 TEAM RESULTS (Complete Dataset):\n")
-  teams_2025_all <- complete_system_all_data$teams_by_year %>%
-    filter(Year == 2025) %>%
-    select(BatterTeam, PA, Hits, Walks, Strikeouts, actual_wOBA, TrackMan_coverage) %>%
-    arrange(desc(PA))
-  print(teams_2025_all)
+# More inclusive PA classification
+classify_all_pas <- function(data) {
   
-  cat("\nTop 2025 players by PA:\n")
-  players_2025_all <- complete_system_all_data$players_by_year %>%
-    filter(Year == 2025) %>%
-    select(Batter, BatterTeam, PA, Hits, actual_wOBA) %>%
-    arrange(desc(PA)) %>%
-    head(15)
-  print(players_2025_all)
+  cat("\nCLASSIFYING ALL PLATE APPEARANCES:\n")
+  cat("==================================\n")
+  
+  # Very inclusive PA identification
+  data <- data %>%
+    filter(!is.na(Batter) & Batter != "") %>%  # Must have a batter
+    mutate(
+      # Classify every possible PA
+      outcome = case_when(
+        # Hits
+        PlayResult == "Single" ~ "single",
+        PlayResult == "Double" ~ "double",
+        PlayResult == "Triple" ~ "triple",
+        PlayResult %in% c("HomeRun", "Home Run") ~ "home_run",
+        
+        # Outs - be very inclusive
+        PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice", "FieldOut", 
+                          "FlyOut", "GroundOut", "PopOut", "LineOut", "ForceOut",
+                          "Groundout", "Flyout", "Popout", "Lineout", "Bunt") ~ "out",
+        
+        # Walks
+        KorBB == "Walk" ~ "walk",
+        PlayResult %in% c("Walk", "IntentionalWalk") ~ "walk",
+        KorBB == "IBB" ~ "intentional_walk",
+        
+        # HBP
+        PitchCall == "HitByPitch" ~ "hit_by_pitch",
+        KorBB == "HitByPitch" ~ "hit_by_pitch",
+        PlayResult == "HitByPitch" ~ "hit_by_pitch",
+        
+        # Strikeouts
+        KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging") ~ "strikeout",
+        PlayResult %in% c("Strikeout", "StrikeoutSwinging", "StrikeoutLooking") ~ "strikeout",
+        
+        # If we have a batter but unclear outcome, it's likely a PA
+        !is.na(Batter) & Batter != "" ~ "unknown_pa",
+        
+        TRUE ~ "not_pa"
+      ),
+      
+      Year = as.numeric(format(as.Date(Date), "%Y"))
+    ) %>%
+    filter(outcome != "not_pa")  # Only remove rows that clearly aren't PAs
+  
+  cat("PAs classified:\n")
+  print(table(data$outcome, useNA = "always"))
+  
+  cat("\nPAs by year:\n")
+  print(table(data$Year, useNA = "always"))
+  
+  return(data)
 }
 
-# Save the complete results
-write.csv(complete_system_all_data$players_by_year, "complete_players_all_navs_data.csv", row.names = FALSE)
-write.csv(complete_system_all_data$teams_by_year, "complete_teams_all_navs_data.csv", row.names = FALSE)
+# Run the complete process
+cat("STEP 1: Reading all CSV files from Navs CSVs folder\n")
+all_navs_data <- read_all_navs_pas("Navs CSVs")
 
-cat("\nComplete results saved with ALL Navs CSV data included\n")
-cat("Now you should see full PA counts for all teams!\n")
+cat("\nSTEP 2: Classifying all plate appearances\n")
+all_pas_classified <- classify_all_pas(all_navs_data)
+
+cat("\nSTEP 3: Final summary\n")
+cat("Total rows processed:", nrow(all_navs_data), "\n")
+cat("Total PAs classified:", nrow(all_pas_classified), "\n")
+
+# Quick team summary for 2025
+if(2025 %in% all_pas_classified$Year) {
+  cat("\n2025 PA counts by team:\n")
+  pas_2025 <- all_pas_classified %>%
+    filter(Year == 2025) %>%
+    group_by(BatterTeam) %>%
+    summarise(Total_PAs = n(), .groups = 'drop') %>%
+    arrange(desc(Total_PAs))
+  print(pas_2025)
+}
+
+cat("\nNow you have ALL PAs from every file - no duplicates removed!\n")
+cat("If PA counts still seem low, check the file summary above to see which files have the most PAs\n")
 ```
 
-This will:
+This version:
 
-1. **Read ALL CSV files** from the “Navs CSVs” folder
-1. **Show each file** as it processes it with row counts and date ranges
-1. **Combine everything** into one complete dataset
-1. **Remove duplicates** intelligently
-1. **Show monthly breakdown** of 2025 data
-1. **Display team PA counts** so you can see the full numbers
+1. **Keeps EVERY row** from every file (no duplicate removal)
+1. **Shows detailed file-by-file breakdown** so you can see where PAs are coming from
+1. **Very inclusive PA classification** - includes unknown PAs rather than excluding them
+1. **Debug output** to show exactly what’s in your data
+1. **Shows team PA counts** so you can verify you’re getting everything
 
-Now you should get ALL your plate appearances, not just the subset that was in the original raw_data file!​​​​​​​​​​​​​​​​
+Run this and it will tell you exactly which files contain the most PAs and whether there are any missing!​​​​​​​​​​​​​​​​
