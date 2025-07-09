@@ -1,227 +1,109 @@
 
-# Go to Navs CSVs folder, combine all CSVs, and run complete analysis
+# Load required libraries
 library(caret)
 library(xgboost)
 library(dplyr)
+library(googledrive)
+library(readr)
 
-# STEP 1: Read and combine ALL CSVs from Navs CSVs folder
-combine_navs_csvs <- function() {
-  
-  cat("READING ALL CSVs FROM 'Navs CSVs' FOLDER\n")
-  cat("======================================\n")
-  
-  # Set path to Navs CSVs folder
-  navs_folder <- "Navs CSVs"
-  
-  # Check if folder exists
-  if(!dir.exists(navs_folder)) {
-    cat("ERROR: 'Navs CSVs' folder not found in current directory\n")
-    cat("Current directory contents:\n")
-    print(list.files())
-    return(NULL)
-  }
-  
-  # Get all CSV files from the folder
-  csv_files <- list.files(navs_folder, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
-  
-  cat("Found", length(csv_files), "CSV files in Navs CSVs folder\n")
-  
-  if(length(csv_files) == 0) {
-    cat("No CSV files found in Navs CSVs folder\n")
-    return(NULL)
-  }
-  
-  # Show files that will be processed
-  cat("\nCSV files to be combined:\n")
-  for(i in 1:length(csv_files)) {
-    cat(sprintf("%2d: %s\n", i, basename(csv_files[i])))
-  }
-  
-  # Read and combine all CSV files
-  all_data <- list()
-  
-  for(i in 1:length(csv_files)) {
-    file_path <- csv_files[i]
-    file_name <- basename(file_path)
-    
-    cat(sprintf("\nReading file %d/%d: %s", i, length(csv_files), file_name))
-    
-    tryCatch({
-      # Read the CSV
-      data <- read.csv(file_path, stringsAsFactors = FALSE)
-      
-      # Add source tracking
-      data$source_csv <- file_name
-      
-      # Basic info
-      cat(sprintf(" - %d rows", nrow(data)))
-      
-      # Check for key columns
-      if("Batter" %in% colnames(data)) {
-        batter_count <- sum(!is.na(data$Batter) & data$Batter != "")
-        cat(sprintf(", %d with batters", batter_count))
-      }
-      
-      # Check date range
-      if("Date" %in% colnames(data)) {
-        dates <- as.Date(data$Date)
-        valid_dates <- dates[!is.na(dates)]
-        if(length(valid_dates) > 0) {
-          date_range <- range(valid_dates)
-          cat(sprintf(", dates: %s to %s", date_range[1], date_range[2]))
-        }
-      }
-      
-      # Add to list if it has data
-      if(nrow(data) > 0) {
-        all_data[[length(all_data) + 1]] <- data
-        cat(" ✓")
-      } else {
-        cat(" (empty)")
-      }
-      
-    }, error = function(e) {
-      cat(sprintf(" ERROR: %s", e$message))
-    })
-  }
-  
-  if(length(all_data) == 0) {
-    cat("\nNo valid data found in any CSV files\n")
-    return(NULL)
-  }
-  
-  cat(sprintf("\n\nCombining %d CSV files...\n", length(all_data)))
-  
-  # Get all unique column names across all files
-  all_columns <- unique(unlist(lapply(all_data, colnames)))
-  cat("Total unique columns across all files:", length(all_columns), "\n")
-  
-  # Standardize each dataset to have all columns
-  cat("Standardizing column structure...\n")
-  standardized_data <- lapply(all_data, function(df) {
-    # Add missing columns with NA
-    missing_cols <- setdiff(all_columns, colnames(df))
-    for(col in missing_cols) {
-      df[[col]] <- NA
-    }
-    # Return with consistent column order
-    return(df[, all_columns])
-  })
-  
-  # Combine all data
-  cat("Binding all data together...\n")
-  combined_data <- do.call(rbind, standardized_data)
-  
-  cat("COMBINED DATASET SUMMARY:\n")
-  cat("========================\n")
-  cat("Total rows:", nrow(combined_data), "\n")
-  cat("Total columns:", ncol(combined_data), "\n")
-  cat("CSV files combined:", length(all_data), "\n")
-  
-  # Check data quality
-  if("Batter" %in% colnames(combined_data)) {
-    total_batters <- sum(!is.na(combined_data$Batter) & combined_data$Batter != "")
-    cat("Rows with batters:", total_batters, "\n")
-  }
-  
-  if("Date" %in% colnames(combined_data)) {
-    dates <- as.Date(combined_data$Date)
-    valid_dates <- dates[!is.na(dates)]
-    if(length(valid_dates) > 0) {
-      date_range <- range(valid_dates)
-      cat("Date range:", as.character(date_range[1]), "to", as.character(date_range[2]), "\n")
-      
-      # Show 2025 data specifically
-      dates_2025 <- valid_dates[valid_dates >= as.Date("2025-01-01")]
-      if(length(dates_2025) > 0) {
-        cat("2025 data points:", length(dates_2025), "\n")
-      }
-    }
-  }
-  
-  if("BatterTeam" %in% colnames(combined_data)) {
-    teams <- table(combined_data$BatterTeam, useNA = "always")
-    cat("Teams found:", length(teams), "\n")
-    cat("Team breakdown:\n")
-    print(teams)
-  }
-  
-  return(combined_data)
-}
+# Set up Google Drive authentication (using your existing setup)
+options(gargle_oauth_cache = ".secrets")
+drive_auth(cache = ".secrets", email = TRUE)
 
-# STEP 2: Run complete analysis with the new combined dataset
-run_complete_analysis <- function(combined_data) {
-  
-  cat("\nRUNNING COMPLETE xwOBA ANALYSIS\n")
-  cat("==============================\n")
-  
-  if(is.null(combined_data)) {
-    cat("No data provided for analysis\n")
-    return(NULL)
-  }
-  
-  # Use the combined data as our new raw_data
-  raw_data <<- combined_data  # Update global raw_data
-  
-  # Run the ultimate correlation model
-  cat("Training xwOBA model...\n")
-  ultimate_results <- train_maximum_correlation_xwoba(combined_data)
-  
-  # Calculate full xwOBA
-  cat("Calculating full xwOBA...\n")
-  full_xwoba_result <- calculate_full_xwoba(combined_data, ultimate_results)
-  
-  # Player and team analysis
-  cat("Calculating player and team statistics...\n")
-  player_team_results <- calculate_player_team_xwoba_inclusive(combined_data, ultimate_results)
-  
-  # Summary results
-  cat("\nANALYSIS COMPLETE!\n")
-  cat("=================\n")
-  cat("Model correlation:", round(ultimate_results$correlation, 4), "\n")
-  cat("Mean xwOBAcon:", round(mean(ultimate_results$predictions), 3), "\n")
-  cat("Full xwOBA:", round(full_xwoba_result, 3), "\n")
-  cat("Total PAs analyzed:", player_team_results$total_pa_captured, "\n")
-  
-  return(list(
-    model_results = ultimate_results,
-    full_xwoba = full_xwoba_result,
-    player_team_stats = player_team_results,
-    combined_data = combined_data
-  ))
-}
+# Use your existing combine_navs_csvs function to get all data from Google Drive
+cat("GETTING ALL DATA FROM GOOGLE DRIVE NAVS CSVs FOLDER\n")
+cat("==================================================\n")
 
-# EXECUTE THE COMPLETE PROCESS
-cat("STARTING COMPLETE PROCESS: COMBINE CSVs + RUN ANALYSIS\n")
-cat("=====================================================\n")
-
-# Step 1: Combine all CSVs from Navs CSVs folder
-combined_navs_data <- combine_navs_csvs()
+# Get all CSV data from your Google Drive Navs CSVs folder
+combined_navs_data <- combine_navs_csvs("Navs CSVs", use_google_drive = TRUE)
 
 if(is.null(combined_navs_data)) {
-  cat("Failed to combine CSV data. Exiting.\n")
+  cat("Failed to get data from Google Drive\n")
 } else {
-  # Step 2: Run complete analysis
-  analysis_results <- run_complete_analysis(combined_navs_data)
+  cat("Successfully loaded", nrow(combined_navs_data), "rows from Google Drive\n")
   
-  if(!is.null(analysis_results)) {
-    # Show 2025 results
-    if(2025 %in% analysis_results$player_team_stats$teams_by_year$Year) {
-      cat("\n2025 TEAM RESULTS:\n")
-      teams_2025 <- analysis_results$player_team_stats$teams_by_year %>%
+  # Clean and standardize the data using your function
+  cleaned_data <- clean_and_standardize_data(combined_navs_data)
+  
+  if(!is.null(cleaned_data)) {
+    cat("Data cleaned:", nrow(cleaned_data), "rows\n")
+    
+    # Update the global raw_data with the Google Drive data
+    raw_data <<- cleaned_data
+    
+    # Now run the complete xwOBA analysis
+    cat("\nRUNNING COMPLETE xwOBA ANALYSIS WITH GOOGLE DRIVE DATA\n")
+    cat("=====================================================\n")
+    
+    # Train the model
+    ultimate_results <- train_maximum_correlation_xwoba(cleaned_data)
+    
+    # Calculate full xwOBA
+    full_xwoba_result <- calculate_full_xwoba(cleaned_data, ultimate_results)
+    
+    # Calculate player and team stats
+    player_team_results <- calculate_player_team_xwoba_inclusive(cleaned_data, ultimate_results)
+    
+    # Show results
+    cat("\nGOOGLE DRIVE DATA ANALYSIS RESULTS:\n")
+    cat("==================================\n")
+    cat("Total rows from Google Drive:", nrow(cleaned_data), "\n")
+    cat("Model correlation:", round(ultimate_results$correlation, 4), "\n")
+    cat("Mean xwOBAcon:", round(mean(ultimate_results$predictions), 3), "\n")
+    cat("Full xwOBA:", round(full_xwoba_result, 3), "\n")
+    cat("Total PAs analyzed:", player_team_results$total_pa_captured, "\n")
+    
+    # Check what years we have
+    if("Date" %in% colnames(cleaned_data)) {
+      dates <- as.Date(cleaned_data$Date)
+      valid_dates <- dates[!is.na(dates)]
+      if(length(valid_dates) > 0) {
+        date_range <- range(valid_dates)
+        cat("Date range:", as.character(date_range[1]), "to", as.character(date_range[2]), "\n")
+        
+        # Show 2025 data specifically
+        dates_2025 <- valid_dates[valid_dates >= as.Date("2025-01-01")]
+        if(length(dates_2025) > 0) {
+          cat("2025 data points:", length(dates_2025), "\n")
+        }
+      }
+    }
+    
+    # Show 2025 team results if available
+    if(2025 %in% player_team_results$teams_by_year$Year) {
+      cat("\n2025 TEAM RESULTS (Google Drive Data):\n")
+      teams_2025 <- player_team_results$teams_by_year %>%
         filter(Year == 2025) %>%
-        select(BatterTeam, PA, Hits, Walks, actual_wOBA) %>%
+        select(BatterTeam, PA, Hits, Walks, Strikeouts, actual_wOBA, TrackMan_coverage) %>%
         arrange(desc(PA))
       print(teams_2025)
+      
+      cat("\nTop 2025 Players by PA:\n")
+      players_2025 <- player_team_results$players_by_year %>%
+        filter(Year == 2025) %>%
+        select(Batter, BatterTeam, PA, Hits, actual_wOBA) %>%
+        arrange(desc(PA)) %>%
+        head(15)
+      print(players_2025)
     }
     
     # Save results
-    write.csv(analysis_results$player_team_stats$players_by_year, "players_from_navs_csvs.csv", row.names = FALSE)
-    write.csv(analysis_results$player_team_stats$teams_by_year, "teams_from_navs_csvs.csv", row.names = FALSE)
+    write.csv(player_team_results$players_by_year, "players_google_drive_complete.csv", row.names = FALSE)
+    write.csv(player_team_results$teams_by_year, "teams_google_drive_complete.csv", row.names = FALSE)
     
-    cat("\n✅ PROCESS COMPLETE!\n")
-    cat("📁 Results saved to CSV files\n")
-    cat("📊 New dataset contains", nrow(combined_navs_data), "total rows\n")
-    cat("🎯 Model correlation:", round(analysis_results$model_results$correlation, 4), "\n")
+    # Save the combined dataset for future use
+    saveRDS(cleaned_data, "navs_all_data_updated.rds")
+    
+    cat("\n✅ COMPLETE ANALYSIS FINISHED!\n")
+    cat("📁 Results saved to:\n")
+    cat("   - players_google_drive_complete.csv\n")
+    cat("   - teams_google_drive_complete.csv\n")
+    cat("   - navs_all_data_updated.rds\n")
+    cat("🎯 Model correlation:", round(ultimate_results$correlation, 4), "\n")
+    cat("📊 Total CSV files processed from Google Drive:", length(unique(cleaned_data$source_file)), "\n")
+    
+  } else {
+    cat("Data cleaning failed\n")
   }
-} 
+}
+ 
