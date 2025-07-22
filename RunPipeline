@@ -1,0 +1,249 @@
+# Load required libraries
+library(googledrive)
+library(readr)
+library(dplyr)
+library(caret)
+library(xgboost)
+
+# Set up Google Drive authentication
+options(gargle_oauth_cache = ".secrets")
+drive_auth(cache = ".secrets", email = TRUE)
+
+
+combine_navs_csvs <- function(folder_path = "Navs CSVs", use_google_drive = TRUE) {
+  
+  cat("COMBINING CSV FILES\n")
+  cat("===========================\n")
+  
+  if (use_google_drive) {
+    cat("Looking in Google Drive folder:", folder_path, "\n")
+    
+    # Find the folder in Google Drive
+    folder <- drive_find(folder_path, type = "folder")
+    
+    if (nrow(folder) == 0) {
+      cat("Google Drive folder not found:", folder_path, "\n")
+      return(NULL)
+    }
+    
+    # Get all CSV files in the folder
+    csv_files <- drive_ls(folder, pattern = "\\.csv$")
+    
+    if (nrow(csv_files) == 0) {
+      cat("No CSV files found in the Google Drive folder.\n")
+      return(NULL)
+    }
+    
+    cat("Found", nrow(csv_files), "CSV files in Google Drive\n")
+    
+    # Initialize combined data
+    combined_data <- data.frame()
+    
+    # Process each CSV file from Google Drive
+    for (i in 1:nrow(csv_files)) {
+      file_name <- csv_files$name[i]
+      cat("Processing:", file_name, "\n")
+      
+      tryCatch({
+        # Download to temporary location
+        temp_file <- tempfile(fileext = ".csv")
+        drive_download(csv_files$id[i], path = temp_file, overwrite = TRUE, verbose = FALSE)
+        
+        # Read the downloaded file
+        current_data <- read_csv(temp_file, show_col_types = FALSE)
+        
+        # Clean up temp file
+        unlink(temp_file)
+        
+        # Standardize column names
+        required_cols <- c("ExitSpeed", "Angle", "PlayResult")
+        alternative_names <- list(
+          ExitSpeed = c("ExitSpeed", "Exit_Speed", "exit_speed", "EV", "ev"),
+          Angle = c("Angle", "Launch_Angle", "launch_angle", "LA", "la"),
+          PlayResult = c("PlayResult", "Play_Result", "play_result", "Result", "result", "Outcome", "outcome")
+        )
+        
+        for (req_col in required_cols) {
+          possible_names <- alternative_names[[req_col]]
+          for (alt_name in possible_names) {
+            if (alt_name %in% names(current_data) && !req_col %in% names(current_data)) {
+              names(current_data)[names(current_data) == alt_name] <- req_col
+              break
+            }
+          }
+        }
+        
+        # Add source file info
+        current_data$source_file <- file_name
+        current_data$file_index <- i
+        
+        # Combine data
+        if (nrow(combined_data) == 0) {
+          combined_data <- current_data
+        } else {
+          combined_data <- bind_rows(combined_data, current_data)
+        }
+        
+        cat("  Added", nrow(current_data), "rows\n")
+        
+      }, error = function(e) {
+        cat("  Error processing", file_name, ":", e$message, "\n")
+      })
+    }
+    
+    cat("Combined", nrow(combined_data), "total rows from", nrow(csv_files), "files\n")
+    
+  } else {
+    # Original local file logic
+    cat("Looking in local folder:", folder_path, "\n")
+    
+    # Set working directory
+    if (dir.exists(folder_path)) {
+      setwd(folder_path)
+      cat("Working directory set to:", getwd(), "\n")
+    } else {
+      cat("Folder not found:", folder_path, "\n")
+      return(NULL)
+    }
+    
+    # Find all CSV files
+    csv_files <- list.files(pattern = "\\.csv$", full.names = FALSE)
+    
+    if (length(csv_files) == 0) {
+      cat("No CSV files found in the folder.\n")
+      return(NULL)
+    }
+    
+    cat("Data Found", length(csv_files), "CSV files\n")
+    
+    # Initialize combined data
+    combined_data <- data.frame()
+    
+    # Process each CSV file
+    for (i in 1:length(csv_files)) {
+      file <- csv_files[i]
+      cat("Processing:", file, "\n")
+      
+      tryCatch({
+        current_data <- read_csv(file, show_col_types = FALSE)
+        
+        # Standardize column names
+        required_cols <- c("ExitSpeed", "Angle", "PlayResult")
+        alternative_names <- list(
+          ExitSpeed = c("ExitSpeed", "Exit_Speed", "exit_speed", "EV", "ev"),
+          Angle = c("Angle", "Launch_Angle", "launch_angle", "LA", "la"),
+          PlayResult = c("PlayResult", "Play_Result", "play_result", "Result", "result", "Outcome", "outcome")
+        )
+        
+        for (req_col in required_cols) {
+          possible_names <- alternative_names[[req_col]]
+          for (alt_name in possible_names) {
+            if (alt_name %in% names(current_data) && !req_col %in% names(current_data)) {
+              names(current_data)[names(current_data) == alt_name] <- req_col
+              break
+            }
+          }
+        }
+        
+        # Add source file info
+        current_data$source_file <- file
+        current_data$file_index <- i
+        
+        # Combine data
+        if (nrow(combined_data) == 0) {
+          combined_data <- current_data
+        } else {
+          combined_data <- bind_rows(combined_data, current_data)
+        }
+        
+        cat("  Added", nrow(current_data), "rows\n")
+        
+      }, error = function(e) {
+        cat("  Error:", e$message, "\n")
+      })
+    }
+    
+    cat("Combined", nrow(combined_data), "total rows from", length(csv_files), "files\n")
+  }
+  
+  return(combined_data)
+}
+
+# ===================================================================
+# PHASE 2: COMPLETE PIPELINE
+# ===================================================================
+
+run_complete_pipeline <- function() {
+  
+  cat("=== NAVS CSV PIPELINE START ===\n\n")
+  
+  # STEP 1: Combine CSVs from Google Drive
+  cat("STEP 1: Combining CSV files from Google Drive...\n")
+  combined_data <- combine_navs_csvs(folder_path = "Navs CSVs", use_google_drive = TRUE)
+  
+  if (is.null(combined_data) || nrow(combined_data) == 0) {
+    cat("ERROR: No data was combined. Check Google Drive folder and files.\n")
+    return(NULL)
+  }
+  
+  # STEP 2: Save combined data
+  cat("\nSTEP 2: Saving combined data...\n")
+  saveRDS(combined_data, "navs_all_data.rds")
+  cat("Saved", nrow(combined_data), "rows to navs_all_data.rds\n")
+  
+  # STEP 3: Data quality check
+  cat("\nSTEP 3: Data quality check...\n")
+  cat("Dataset dimensions:", nrow(combined_data), "rows x", ncol(combined_data), "columns\n")
+  cat("Column names:", paste(names(combined_data), collapse = ", "), "\n")
+  
+  # Check required columns
+  required_cols <- c("ExitSpeed", "Angle", "PlayResult")
+  missing_cols <- setdiff(required_cols, names(combined_data))
+  if(length(missing_cols) > 0) {
+    cat("WARNING: Missing required columns:", paste(missing_cols, collapse = ", "), "\n")
+  } else {
+    cat("SUCCESS: All required columns present\n")
+  }
+  
+  # Data completeness
+  for(col in required_cols) {
+    if(col %in% names(combined_data)) {
+      complete_pct <- sum(!is.na(combined_data[[col]])) / nrow(combined_data) * 100
+      cat(col, ":", round(complete_pct, 1), "% complete\n")
+    }
+  }
+  
+  # STEP 4: Set raw_data for the model
+  raw_data <<- combined_data  # Make it available globally
+  
+  cat("\n=== DATA COMBINATION COMPLETE ===\n")
+  cat("Ready to run xwOBA model with", nrow(raw_data), "rows of data\n")
+  
+  return(combined_data)
+}
+
+# ===================================================================
+# EXECUTE PIPELINE
+# ===================================================================
+
+# Run the complete pipeline
+cat("Starting Navs CSV Pipeline...\n")
+pipeline_results <- run_complete_pipeline()
+
+# Check if successful
+if (!is.null(pipeline_results)) {
+  cat("\n Pipeline completed successfully!\n")
+  cat(" Data available as 'raw_data' with", nrow(raw_data), "rows\n")
+  
+  # Now you can run any of your models:
+  cat("\nExample next steps:\n")
+  cat("# Run your ultimate model:\n")
+  cat("ultimate_results <- train_ultimate_performance_xwoba(raw_data)\n")
+  cat("\n# Or run the advanced polynomial model:\n")
+  cat("advanced_results <- train_advanced_polynomial_xwoba(raw_data)\n")
+  cat("\n# Search for a player:\n")
+  cat("player_results <- search_player_advanced(ultimate_results, raw_data, 'PlayerName')\n")
+  
+} else {
+  cat("\nPipeline failed - check Google Drive authentication and folder access\n")
+}
