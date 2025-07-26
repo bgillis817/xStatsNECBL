@@ -1,0 +1,139 @@
+﻿# ===================================================================
+# ROSTER-BASED TEAM MAPPING WITH SEASON IDs
+# ===================================================================
+
+
+# Complete team mapping with roster URLs and season IDs
+necbl_team_mapping_enhanced <- list(
+  "BRI_B" = list(
+    name = "Bristol Blues", 
+    abbrev = "BRI",
+    team_id = "89490"
+  ),
+  "DAN_WES" = list(
+    name = "Danbury Westerners", 
+    abbrev = "DAN",
+    team_id = "6402"
+  ),
+  "KEE_SWA" = list(
+    name = "Keene SwampBats", 
+    abbrev = "KSB",
+    team_id = "6401"
+  ),
+  "MYS_SCH" = list(
+    name = "Mystic Schooners", 
+    abbrev = "MSC",
+    team_id = "11912"
+  ),
+  "MAR_VIN" = list(
+    name = "Martha's Vineyard Sharks", 
+    abbrev = "MV",
+    team_id = "142675"
+  ),
+  "NEW_GUL" = list(
+    name = "Newport Gulls", 
+    abbrev = "NG",
+    team_id = "6458"
+  ),
+  "NOR_ADA" = list(
+    name = "North Adams Steeplecats", 
+    abbrev = "NSC",
+    team_id = "6404"
+  ),
+  "NSH_N" = list(
+    name = "North Shore Navigators", 
+    abbrev = "NSN",
+    team_id = "154432"
+  ),
+  "OCE_STA" = list(
+    name = "Ocean State Waves", 
+    abbrev = "OSW",
+    team_id = "51489"
+  ),
+  "SAN_MAI" = list(
+    name = "Sanford Mainers", 
+    abbrev = "SM",
+    team_id = "6459"
+  ),
+  "UPP_VAL" = list(
+    name = "Upper Valley Nighthawks", 
+    abbrev = "UVNH",
+    team_id = "104040"
+  ),
+  "VAL_BLU" = list(
+    name = "Valley Blue Sox", 
+    abbrev = "VAL",
+    team_id = "6403"
+  ),
+  "VER_MOU" = list(
+    name = "Vermont Mountaineers", 
+    abbrev = "VM",
+    team_id = "6405"
+  )
+)
+
+
+# Season ID mapping
+necbl_season_ids <- list(
+  "2021" = "32746",
+  "2022" = "33205", 
+  "2023" = "33589",
+  "2024" = "33860",
+  "2025" = "34029"
+)
+
+
+
+
+# ===================================================================
+# ENHANCED ROSTER-VERIFIED MATCHING FUNCTION
+# ===================================================================
+
+
+match_with_roster_verification <- function(model_data, season = "2025") {
+  cat("=== ROSTER-VERIFIED MATCHING FOR", season, "SEASON ===\n")
+  
+  # Step 1: Filter model data by year
+  if ("Date" %in% names(model_data)) {
+    target_year <- as.numeric(season)
+    model_data_filtered <- model_data %>%
+      mutate(Year = as.numeric(format(Date, "%Y"))) %>%
+      filter(Year == target_year)
+    
+    cat("Model records for", target_year, ":", nrow(model_data_filtered), "\n")
+    
+    if (nrow(model_data_filtered) == 0) {
+      cat("❌ NO MODEL DATA FOUND FOR YEAR", target_year, "\n")
+      available_years <- sort(unique(as.numeric(format(model_data$Date, "%Y"))))
+      cat("Available years in model data:", paste(available_years, collapse = ", "), "\n")
+      return(data.frame())
+    }
+  } else {
+    model_data_filtered <- model_data
+    cat("Model records (no date filter):", nrow(model_data_filtered), "\n")
+  }
+  
+  # Step 2: Parse model player names
+  model_parsed <- model_data_filtered %>%
+    mutate(
+      # Remove 'x' prefix if present
+      Clean_Batter = str_replace_all(str_trim(Batter), "^x\\s+|,\\s*x\\s+", function(x) {
+        if (grepl("^x\\s+", x)) return("")
+        if (grepl(",\\s*x\\s+", x)) return(", ")
+        return(x)
+      }),
+      
+      # Parse: "Last, First" format from model
+      Last_Name = toupper(trimws(sub(",.*", "", Clean_Batter))),
+      First_Name_Full = toupper(trimws(sub(".*,\\s*", "", Clean_Batter))),
+      First_Name = toupper(trimws(str_split(First_Name_Full, "\\s+")[[1]][1])),
+      First_Initial = toupper(substr(First_Name, 1, 1)),
+      
+      # Expected team mapping
+      Expected_Team_Code = BatterTeam,
+      Expected_Team_Name = sapply(BatterTeam, function(x) {
+        team_info <- necbl_team_mapping_enhanced[[x]]
+        if (!is.null(team_info)) team_info$name else NA_character_
+      }),
+      Expected_Team_Abbrev = sapply(BatterTeam, function(x) {
+        team_info <- necbl_
