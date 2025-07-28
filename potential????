@@ -1695,3 +1695,34 @@ server <- function(input, output, session) {
 
 shinyApp(ui = ui, server = server)
 
+# ===================================================================
+# RUN THE APPLICATION
+# ===================================================================
+
+shinyApp(ui = ui, server = server)
+
+# ===================================================================
+# USAGE INSTRUCTIONS
+# ===================================================================
+cat("🎯 Multi-Season xwOBA Dashboard Ready!\n")
+cat("\n📋 Key Features:\n")
+cat("✅ Individual season tracking for players across multiple years\n") 
+cat("✅ Ocean State team combination (OCE_STA + OCE_STA6)\n")
+cat("✅ Multi-season player trajectory analysis\n")
+cat("✅ Season-by-season Pointstreak data integration\n")
+cat("✅ Player improvement and consistency tracking\n")
+cat("✅ Enhanced performance analysis with season separation\n")
+cat("✅ Interactive dashboards with plotly integration\n")
+cat("\n🚀 Dashboard Tabs:\n")
+cat("1. Season Overview - Summary of all seasons and data coverage\n")
+cat("2. Player Analysis - Individual player performance across seasons\n") 
+cat("3. Multi-Season Tracking - Players who played multiple seasons\n")
+cat("4. Performance Analysis - Expected vs actual performance by season\n")
+cat("5. Team Browser - Browse players by team and season\n")
+cat("\n📊 Special Features:\n")
+cat("• Automatic Ocean State team merging (OCE_STA + OCE_STA6)\n")
+cat("• Player-season unique identifiers for accurate tracking\n")
+cat("• Multi-season refresh capability\n")
+cat("• Individual season Pointstreak data scraping\n")
+cat("• Player trajectory and improvement analysis\n")
+
