@@ -238,9 +238,54 @@ necbl_urls_by_season <- list(
     "Upper Valley Nighthawks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=104040&seasonid=33860",
     "Valley Blue Sox" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6403&seasonid=33860",
     "Vermont Mountaineers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6405&seasonid=33860"
+  ),
+  "2023" = list(
+    "Bristol Blues" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=33603&teamid=89490",
+    "Danbury Westerners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6402&seasonid=33603",
+    "Keene SwampBats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6401&seasonid=33603",
+    "Martha's Vineyard Sharks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=142675&seasonid=33603",
+    "Mystic Schooners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=11912&seasonid=33603",
+    "Newport Gulls" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6458&seasonid=33603",
+    "North Adams Steeplecats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6404&seasonid=33603",
+    "North Shore Navigators" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=154432&seasonid=33603",
+    "Ocean State Waves" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=51489&seasonid=33603",
+    "Sanford Mainers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6459&seasonid=33603",
+    "Upper Valley Nighthawks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=104040&seasonid=33603",
+    "Valley Blue Sox" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6403&seasonid=33603",
+    "Vermont Mountaineers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6405&seasonid=33603"
+  ),
+  "2022" = list(
+    "Bristol Blues" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=33347&teamid=89490",
+    "Danbury Westerners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6402&seasonid=33347",
+    "Keene SwampBats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6401&seasonid=33347",
+    "Martha's Vineyard Sharks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=142675&seasonid=33347",
+    "Mystic Schooners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=11912&seasonid=33347",
+    "Newport Gulls" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6458&seasonid=33347",
+    "North Adams Steeplecats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6404&seasonid=33347",
+    "North Shore Navigators" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=154432&seasonid=33347",
+    "Ocean State Waves" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=51489&seasonid=33347",
+    "Sanford Mainers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6459&seasonid=33347",
+    "Upper Valley Nighthawks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=104040&seasonid=33347",
+    "Valley Blue Sox" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6403&seasonid=33347",
+    "Vermont Mountaineers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6405&seasonid=33347"
+  ),
+  "2021" = list(
+    "Bristol Blues" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=33089&teamid=89490",
+    "Danbury Westerners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6402&seasonid=33089",
+    "Keene SwampBats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6401&seasonid=33089",
+    "Martha's Vineyard Sharks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=142675&seasonid=33089",
+    "Mystic Schooners" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=11912&seasonid=33089",
+    "Newport Gulls" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6458&seasonid=33089",
+    "North Adams Steeplecats" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6404&seasonid=33089",
+    "North Shore Navigators" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=154432&seasonid=33089",
+    "Ocean State Waves" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=51489&seasonid=33089",
+    "Sanford Mainers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6459&seasonid=33089",
+    "Upper Valley Nighthawks" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=104040&seasonid=33089",
+    "Valley Blue Sox" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6403&seasonid=33089",
+    "Vermont Mountaineers" = "http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=6405&seasonid=33089"
   )
-  # Add 2023, 2022, 2021 similarly...
 )
+
 
 # Enhanced Pointstreak scraper with proper wOBA/wOBACON calculation
 get_necbl_woba_by_season <- function(season = "2025") {
