@@ -1554,7 +1554,7 @@ data\n\nClick 'Load Selected Season' or 'Load All Seasons'")),
 launch_xwoba_dashboard <- function() {
   # Check if required data exists
   if (!exists("combined_df") && !exists("raw_data")) {
-    stop("No model data found. Please ensure 'combined_df' or 'raw_data' exists in your environment.")
+    stop("No model data found. Please ensure 'combined_df' or 'raw_data' exists in environment.")
   }
   
   cat("🎯 Launching Enhanced xwOBA Dashboard...\n")
