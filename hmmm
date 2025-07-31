@@ -1116,13 +1116,13 @@ server <- function(input, output, session) {
         select(Batter, xwOBA, wOBA, PA_Count, Data_Source, Team, PS_Season) %>%
         rename(Expected = xwOBA, Actual = wOBA)
       x_label <- paste("wOBA (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBA (Model)"
+      y_label <- "xwOBA (Your Model)"
     } else {
       plot_data <- player_performance %>%
         select(Batter, xwOBACON, wOBACON, PA_Count, Data_Source, Team, PS_Season) %>%
         rename(Expected = xwOBACON, Actual = wOBACON)
       x_label <- paste("wOBACON (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBACON (Model)"
+      y_label <- "xwOBACON (Your Model)"
     }
     
     # Create enhanced scatter plot
