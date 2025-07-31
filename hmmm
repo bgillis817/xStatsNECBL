@@ -22,7 +22,7 @@ library(plotly)
 
 # Enhanced xwOBA calculation with proper PA integration
 calculate_model_xwoba_and_full <- function(raw_data, xgb_model = NULL) {
-  cat("=== CALCULATING MODEL xwOBA WITH PROPER PA INTEGRATION ===\n")
+  cat("=== CALCULATING xwOBA ===\n")
   
   # Step 1: Filter to batted balls with complete data
   batted_balls <- raw_data %>%
@@ -391,7 +391,7 @@ get_necbl_woba_by_season <- function(season = "2025") {
 
 # Enhanced matching function with 4-tier strategy
 match_necbl_data <- function(model_data, necbl_data, selected_season = "2025") {
-  cat("=== MATCHING MODEL DATA WITH POINTSTREAK OVERLAY ===\n")
+  cat("=== MATCHING MODEL DATA WITH OVERLAY ===\n")
   cat("Model records (PRIMARY):", nrow(model_data), "\n")
   cat("NECBL records (OVERLAY):", nrow(necbl_data), "\n")
   cat("Selected season:", selected_season, "\n")
@@ -658,7 +658,6 @@ ui <- dashboardPage(
       menuItem("Overperformers", tabName = "overperform", icon = icon("arrow-up")),
       menuItem("Player Comparison", tabName = "comparison", icon = icon("balance-scale")),
       menuItem("Team Browser", tabName = "browser", icon = icon("table")),
-      menuItem("Data Management", tabName = "data", icon = icon("database"))
     )
   ),
   
@@ -834,39 +833,6 @@ ui <- dashboardPage(
         )
       ),
       
-      # Data Management Tab
-      tabItem(tabName = "data",
-        fluidRow(
-          box(
-            title = "Data Loading Status", status = "primary", solidHeader = TRUE, width = 6,
-            verbatimTextOutput("data_info"),
-            hr(),
-            h4("Available Actions:"),
-            actionButton("refresh_current", "Refresh Current Season", 
-                        class = "btn btn-primary", icon = icon("refresh")),
-            br(), br(),
-            actionButton("clear_cache", "Clear All Cached Data", 
-                        class = "btn btn-warning", icon = icon("trash"))
-          ),
-          
-          box(
-            title = "Match Quality Analysis", status = "info", solidHeader = TRUE, width = 6,
-            DT::dataTableOutput("match_quality_summary"),
-            hr(),
-            plotOutput("match_quality_plot", height = "300px")
-          )
-        ),
-        
-        fluidRow(
-          box(
-            title = "Season-by-Season Breakdown", status = "success", solidHeader = TRUE, width = 12,
-            DT::dataTableOutput("season_breakdown")
-          )
-        )
-      )
-    )
-  )
-)
 
 # ===================================================================
 # SHINY SERVER
@@ -953,7 +919,7 @@ server <- function(input, output, session) {
         nrow()
       matched_players <- sum(!is.na(values$enhanced_data$actual_woba_final))
       
-      paste("✓", total_players, "players,", matched_players, "with Pointstreak data")
+      paste("✓", total_players, "players,", matched_players, "with actual data")
     } else if (!is.null(values$enhanced_data)) {
       total_players <- values$enhanced_data %>% 
         distinct(Batter) %>% 
@@ -968,7 +934,7 @@ server <- function(input, output, session) {
   observeEvent(input$load_season, {
     withProgress(message = paste('Loading', input$primary_season, 'season...'), value = 0, {
       
-      incProgress(0.3, detail = "Scraping Pointstreak data...")
+      incProgress(0.3, detail = "Scraping actual data...")
       
       tryCatch({
         # Scrape selected season
@@ -1104,7 +1070,8 @@ server <- function(input, output, session) {
     if (nrow(player_performance) == 0) {
       p <- ggplot() + 
         geom_text(aes(x = 0.5, y = 0.5, 
-                     label = paste0("No players with ", input$primary_season, " Pointstreak data\n\nClick 'Load Selected Season' or 'Load All Seasons'")), 
+                     label = paste0("No players with ", input$primary_season, " Actual
+data\n\nClick 'Load Selected Season' or 'Load All Seasons'")), 
                   size = 6, color = "#667eea") +
         theme_void()
       return(ggplotly(p))
@@ -1115,14 +1082,14 @@ server <- function(input, output, session) {
       plot_data <- player_performance %>%
         select(Batter, xwOBA, wOBA, PA_Count, Data_Source, Team, PS_Season) %>%
         rename(Expected = xwOBA, Actual = wOBA)
-      x_label <- paste("wOBA (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBA (Your Model)"
+      x_label <- paste("wOBA (Actual", input$primary_season, ")")
+      y_label <- "xwOBA (Model)"
     } else {
       plot_data <- player_performance %>%
         select(Batter, xwOBACON, wOBACON, PA_Count, Data_Source, Team, PS_Season) %>%
         rename(Expected = xwOBACON, Actual = wOBACON)
-      x_label <- paste("wOBACON (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBACON (Your Model)"
+      x_label <- paste("wOBACON (Actual", input$primary_season, ")")
+      y_label <- "xwOBACON (Model)"
     }
     
     # Create enhanced scatter plot
@@ -1436,10 +1403,10 @@ server <- function(input, output, session) {
     if (!is.null(values$necbl_data_all)) {
       ps_seasons <- length(unique(values$necbl_data_all$Season))
       ps_players <- nrow(values$necbl_data_all)
-      info_text <- paste0(info_text, "Pointstreak Data: ", ps_seasons, " seasons, ", ps_players, " player-season records\n")
+      info_text <- paste0(info_text, "Actual Data: ", ps_seasons, " seasons, ", ps_players, " player-season records\n")
       info_text <- paste0(info_text, "Available Seasons: ", paste(sort(values$available_seasons), collapse = ", "), "\n")
     } else {
-      info_text <- paste0(info_text, "Pointstreak Data: Not loaded\n")
+      info_text <- paste0(info_text, "Actual Data: Not loaded\n")
     }
     
     if (!is.null(values$enhanced_data)) {
@@ -1447,7 +1414,7 @@ server <- function(input, output, session) {
       total_records <- nrow(values$enhanced_data)
       match_rate <- round(matched_records / total_records * 100, 1)
       info_text <- paste0(info_text, "Enhanced Data: ", total_records, " total records\n")
-      info_text <- paste0(info_text, "Pointstreak Matches: ", matched_records, " (", match_rate, "%)\n")
+      info_text <- paste0(info_text, "Matches: ", matched_records, " (", match_rate, "%)\n")
     }
     
     if (!is.null(values$last_update)) {
@@ -1541,7 +1508,7 @@ server <- function(input, output, session) {
   observeEvent(input$clear_cache, {
     showModal(modalDialog(
       title = "Clear All Data",
-      "Are you sure you want to clear all cached Pointstreak data? This will reset the dashboard to model-only data.",
+      "Are you sure you want to clear all cached data?.",
       footer = tagList(
         actionButton("confirm_clear", "Yes, Clear All", class = "btn btn-danger"),
         modalButton("Cancel")
