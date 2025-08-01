@@ -1,6 +1,4 @@
-# Enhanced xwOBA Dashboard - Complete R Shiny Integration
-# Fixes: Season-specific parsing, player disambiguation, proper PA integration
-
+#  xwOBA Dashboard - Complete R Shiny Integration
 # ===================================================================
 # REQUIRED LIBRARIES
 # ===================================================================
@@ -15,14 +13,13 @@ library(httr)
 library(stringr)
 library(xml2)
 library(plotly)
-
 # ===================================================================
 # ENHANCED CORE FUNCTIONS
 # ===================================================================
 
 # Enhanced xwOBA calculation with proper PA integration
-calculate_model_xwoba_and_full <- function(raw_data, xgb_model = NULL) {
-  cat("=== CALCULATING MODEL xwOBA WITH PROPER PA INTEGRATION ===\n")
+calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
+  cat("=== CALCULATING EXPECTED xwOBA WITH PROPER PA INTEGRATION ===\n")
   
   # Step 1: Filter to batted balls with complete data
   batted_balls <- raw_data %>%
@@ -50,14 +47,14 @@ calculate_model_xwoba_and_full <- function(raw_data, xgb_model = NULL) {
   # wOBA weights
   woba_weights_vector <- c(0.000, 0.888, 1.271, 1.616, 2.101)
   
-  # Get model predictions for batted balls
-  if (!is.null(xgb_model) && exists("dtest")) {
-    test_probs <- predict(xgb_model, dtest, reshape = TRUE)
+  # Get expected predictions for batted balls
+  if (!is.null(xgb_expected) && exists("dtest")) {
+    test_probs <- predict(xgb_expected, dtest, reshape = TRUE)
     colnames(test_probs) <- c("P_out", "P_single", "P_double", "P_triple", "P_home_run")
     predicted_xwobacon <- as.vector(test_probs %*% woba_weights_vector)
     batted_balls$predicted_xwobacon <- predicted_xwobacon
   } else {
-    # Fallback calculation if model objects not available
+    # Fallback calculation if expected objects not available
     batted_balls$predicted_xwobacon <- pmin(2.5, pmax(0, 
       0.1 + (batted_balls$ExitSpeed - 60) * 0.01 + 
       pmax(0, 30 - abs(batted_balls$Angle - 20)) * 0.005
@@ -138,25 +135,86 @@ calculate_model_xwoba_and_full <- function(raw_data, xgb_model = NULL) {
   
   return(enhanced_data)
 }
+# ===================================================================
+# NECBL TEAM MAPPING & SEASON-SPECIFIC SCRAPING
+# ===================================================================
 
 # ===================================================================
 # NECBL TEAM MAPPING & SEASON-SPECIFIC SCRAPING
 # ===================================================================
 
+# Enhanced team mapping with team IDs
 necbl_team_mapping <- list(
-  "BRI_B" = list(name = "Bristol Blues", abbrev = "BRI"),
-  "DAN_WES" = list(name = "Danbury Westerners", abbrev = "DAN"),
-  "KEE_SWA" = list(name = "Keene SwampBats", abbrev = "KSB"),
-  "MAR_VIN" = list(name = "Martha's Vineyard Sharks", abbrev = "MV"),
-  "MYS_SCH" = list(name = "Mystic Schooners", abbrev = "MSC"),
-  "NEW_GUL" = list(name = "Newport Gulls", abbrev = "NG"),
-  "NOR_ADA" = list(name = "North Adams Steeplecats", abbrev = "NSC"),
-  "NSH_N" = list(name = "North Shore Navigators", abbrev = "NSN"),
-  "OCE_STA" = list(name = "Ocean State Waves", abbrev = "OSW"),
-  "SAN_MAI" = list(name = "Sanford Mainers", abbrev = "SM"),
-  "UPP_VAL" = list(name = "Upper Valley Nighthawks", abbrev = "UVNH"),
-  "VAL_BLU" = list(name = "Valley Blue Sox", abbrev = "VAL"),
-  "VER_MOU" = list(name = "Vermont Mountaineers", abbrev = "VM")
+  "BRI_B" = list(
+    name = "Bristol Blues", 
+    abbrev = "BRI",
+    team_id = "89490"
+  ),
+  "DAN_WES" = list(
+    name = "Danbury Westerners", 
+    abbrev = "DAN",
+    team_id = "6402"
+  ),
+  "KEE_SWA" = list(
+    name = "Keene SwampBats", 
+    abbrev = "KSB",
+    team_id = "6401"
+  ),
+  "MYS_SCH" = list(
+    name = "Mystic Schooners", 
+    abbrev = "MSC",
+    team_id = "11912"
+  ),
+  "MAR_VIN" = list(
+    name = "Martha's Vineyard Sharks", 
+    abbrev = "MV",
+    team_id = "142675"
+  ),
+  "NEW_GUL" = list(
+    name = "Newport Gulls", 
+    abbrev = "NG",
+    team_id = "6458"
+  ),
+  "NOR_ADA" = list(
+    name = "North Adams Steeplecats", 
+    abbrev = "NSC",
+    team_id = "6404"
+  ),
+  "NSH_N" = list(
+    name = "North Shore Navigators", 
+    abbrev = "NSN",
+    team_id = "154432"
+  ),
+  "OCE_STA" = list(
+    name = "Ocean State Waves", 
+    abbrev = "OSW",
+    team_id = "51489"
+  ),
+  "OCE_STA6" = list(
+    name = "Ocean State Waves", 
+    abbrev = "OSW",
+    team_id = "51489"
+  ),
+  "SAN_MAI" = list(
+    name = "Sanford Mainers", 
+    abbrev = "SM",
+    team_id = "6459"
+  ),
+  "UPP_VAL" = list(
+    name = "Upper Valley Nighthawks", 
+    abbrev = "UVNH",
+    team_id = "104040"
+  ),
+  "VAL_BLU" = list(
+    name = "Valley Blue Sox", 
+    abbrev = "VAL",
+    team_id = "6403"
+  ),
+  "VER_MOU" = list(
+    name = "Vermont Mountaineers", 
+    abbrev = "VM",
+    team_id = "6405"
+  )
 )
 
 # NECBL URLs by season with proper season IDs
@@ -168,7 +226,7 @@ necbl_urls_by_season <- list(
   "2021" = list(seasonid = "33089")
 )
 
-# Team IDs for URL construction
+# Team IDs for URL construction (extracted from enhanced mapping)
 team_ids <- list(
   "Bristol Blues" = "89490",
   "Danbury Westerners" = "6402",
@@ -184,8 +242,7 @@ team_ids <- list(
   "Valley Blue Sox" = "6403",
   "Vermont Mountaineers" = "6405"
 )
-
-# Enhanced Pointstreak scraper with season-specific parsing
+# Enhanced scraper with season-specific parsing
 get_necbl_woba_by_season <- function(season = "2025") {
   cat("=== SCRAPING NECBL", season, "SEASON ===\n")
   
@@ -294,13 +351,13 @@ get_necbl_woba_by_season <- function(season = "2025") {
                 
                 if (PA > 0 && Batted_Balls > 0) {
                   # wOBA: weighted value / PAs
-                  pointstreak_wOBA <- (singles_val * 0.888 + doubles_val * 1.271 + 
-                                      triples_val * 1.616 + hr_val * 2.101 + 
-                                      (bb_val + hbp_val) * 0.690) / PA
+                  actual_wOBA <- (singles_val * 0.888 + doubles_val * 1.271 + 
+                                  triples_val * 1.616 + hr_val * 2.101 + 
+                                  (bb_val + hbp_val) * 0.690) / PA
                   
                   # wOBACON: weighted value / Batted_Balls
-                  pointstreak_wOBACON <- (singles_val * 0.888 + doubles_val * 1.271 + 
-                                         triples_val * 1.616 + hr_val * 2.101) / Batted_Balls
+                  actual_wOBACON <- (singles_val * 0.888 + doubles_val * 1.271 + 
+                                     triples_val * 1.616 + hr_val * 2.101) / Batted_Balls
                   
                   # Enhanced player name parsing for better matching
                   clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s,.-]", ""))
@@ -347,8 +404,8 @@ get_necbl_woba_by_season <- function(season = "2025") {
                     First_Initial = toupper(str_trim(first_initial)),
                     Middle_Initial = toupper(str_trim(middle_initial)),
                     Player_Season_ID = player_season_id,
-                    wOBA = round(pointstreak_wOBA, 3),
-                    wOBACON = round(pointstreak_wOBACON, 3),
+                    wOBA = round(actual_wOBA, 3),
+                    wOBACON = round(actual_wOBACON, 3),
                     Season = season,
                     Team = team_name,
                     Team_Abbrev = team_abbrev,
@@ -388,11 +445,10 @@ get_necbl_woba_by_season <- function(season = "2025") {
   cat("Total players with calculated wOBA/wOBACON for", season, ":", nrow(all_woba), "\n")
   return(all_woba)
 }
-
-# Enhanced matching function with 4-tier strategy
-match_necbl_data <- function(model_data, necbl_data, selected_season = "2025") {
-  cat("=== MATCHING MODEL DATA WITH POINTSTREAK OVERLAY ===\n")
-  cat("Model records (PRIMARY):", nrow(model_data), "\n")
+# Enhanced matching function with improved player disambiguation
+match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025") {
+  cat("=== MATCHING EXPECTED DATA WITH ACTUAL OVERLAY ===\n")
+  cat("Expected records (PRIMARY):", nrow(expected_data), "\n")
   cat("NECBL records (OVERLAY):", nrow(necbl_data), "\n")
   cat("Selected season:", selected_season, "\n")
   
@@ -402,15 +458,15 @@ match_necbl_data <- function(model_data, necbl_data, selected_season = "2025") {
   
   cat("NECBL records for", selected_season, ":", nrow(necbl_season_data), "\n")
   
-  # Parse model data names: "Last Name, First Name" format
-  model_with_names <- model_data %>%
+  # Parse expected data names: "Last Name, First Name" format
+  expected_with_names <- expected_data %>%
     mutate(
-      # Enhanced name parsing for model data
+      # Enhanced name parsing for expected data
       Last_Name = toupper(trimws(sub(",.*", "", Batter))),
       First_Name_Full = trimws(sub(".*,\\s*", "", Batter)),
       First_Initial = toupper(substr(First_Name_Full, 1, 1)),
       
-      # Handle middle names/initials in model data
+      # Handle middle names/initials in expected data
       First_Name_Parts = strsplit(First_Name_Full, "\\s+"),
       First_Name = sapply(First_Name_Parts, function(x) if(length(x) > 0) x[1] else ""),
       Middle_Initial = sapply(First_Name_Parts, function(x) {
@@ -427,129 +483,193 @@ match_necbl_data <- function(model_data, necbl_data, selected_season = "2025") {
         if (!is.null(team_info)) team_info$abbrev else NA_character_
       }),
       
-      # Create model player identifier
-      Model_Player_ID = paste(Last_Name, First_Initial, Expected_NECBL_Abbrev, sep = "_")
+      # Create enhanced player identifier with team disambiguation
+      Expected_Player_ID = paste(Last_Name, First_Initial, Expected_NECBL_Abbrev, selected_season, sep = "_")
     )
   
-  # If no NECBL data for selected season, return model-only
+  # Create enhanced NECBL identifiers for better disambiguation
+  necbl_season_data <- necbl_season_data %>%
+    mutate(
+      NECBL_Player_ID = paste(Last_Name, First_Initial, Team_Abbrev, Season, sep = "_")
+    )
+  
+  # If no NECBL data for selected season, return expected-only
   if (nrow(necbl_season_data) == 0) {
-    return(model_with_names %>%
+    return(expected_with_names %>%
            select(-Last_Name, -First_Initial, -First_Name_Full, -First_Name_Parts, 
                   -First_Name, -Middle_Initial, -Expected_NECBL_Team, 
-                  -Expected_NECBL_Abbrev, -Model_Player_ID) %>%
+                  -Expected_NECBL_Abbrev, -Expected_Player_ID) %>%
            mutate(
              actual_woba_final = NA_real_,
              actual_wobacon_final = NA_real_,
-             data_source = "Model Only",
-             pointstreak_team_abbrev = NA_character_,
-             pointstreak_season = NA_character_
+             data_source = "Expected Only",
+             actual_team_abbrev = NA_character_,
+             actual_season = NA_character_
            ))
   }
   
-  # 4-tier matching strategy
+  # ENHANCED 5-tier matching strategy with better disambiguation
   
-  # Tier 1: Exact match (Last + First + Team + Season)
-  tier1_matches <- model_with_names %>%
+  # Tier 1: EXACT MATCH - Last + First + Team + Season (Most Precise)
+  tier1_matches <- expected_with_names %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Initial, Team_Abbrev, wOBA, wOBACON, Season, Team, Player_Season_ID), 
+      select(Last_Name, First_Initial, Team_Abbrev, Season, wOBA, wOBACON, Team, Player_Season_ID, NECBL_Player_ID), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev" = "Team_Abbrev")
     ) %>%
-    mutate(match_tier = ifelse(!is.na(wOBA), "Tier1_Exact", NA_character_))
+    filter(!is.na(wOBA)) %>%
+    mutate(match_tier = "Tier1_Exact_Team_Season")
   
-  # Tier 2: Team + Name match (for team name vs abbrev mismatches)
-  tier2_matches <- tier1_matches %>%
-    filter(is.na(match_tier)) %>%
-    select(-wOBA, -wOBACON, -Season, -Team, -Player_Season_ID, -match_tier) %>%
+  # Tier 2: TEAM NAME MATCH - For team name vs abbrev discrepancies
+  unmatched_after_tier1 <- expected_with_names %>%
+    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev"))
+  
+  tier2_matches <- unmatched_after_tier1 %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Initial, Team, wOBA, wOBACON, Season, Team_Abbrev, Player_Season_ID), 
+      select(Last_Name, First_Initial, Team, Season, wOBA, wOBACON, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Team" = "Team")
     ) %>%
-    mutate(match_tier = ifelse(!is.na(wOBA), "Tier2_Team", NA_character_))
+    filter(!is.na(wOBA)) %>%
+    mutate(match_tier = "Tier2_Team_Name_Match")
   
-  # Tier 3: Full name match (for players who might have switched teams)
-  tier3_matches <- tier2_matches %>%
-    filter(is.na(match_tier)) %>%
-    select(-wOBA, -wOBACON, -Season, -Team_Abbrev, -Player_Season_ID, -match_tier) %>%
+  # Tier 3: SMART DISAMBIGUATION - Same name, different teams, pick best match
+  unmatched_after_tier2 <- expected_with_names %>%
+    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
+    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team"))
+  
+  tier3_matches <- unmatched_after_tier2 %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Name, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID), 
-      by = c("Last_Name", "First_Name" = "First_Name")
-    ) %>%
-    mutate(match_tier = ifelse(!is.na(wOBA), "Tier3_FullName", NA_character_))
-  
-  # Tier 4: Name + Initial only (fallback for name variations)
-  tier4_matches <- tier3_matches %>%
-    filter(is.na(match_tier)) %>%
-    select(-wOBA, -wOBACON, -Season, -Team, -Team_Abbrev, -Player_Season_ID, -match_tier) %>%
-    left_join(
-      necbl_season_data %>% 
-      group_by(Last_Name, First_Initial) %>%
-      # For duplicate Last+Initial, prefer current team match
-      arrange(desc(ifelse(Team_Abbrev %in% unique(model_with_names$Expected_NECBL_Abbrev), 1, 0))) %>%
-      slice_head(n = 1) %>%
-      ungroup() %>%
-      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID), 
+      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
       by = c("Last_Name", "First_Initial")
     ) %>%
-    mutate(match_tier = ifelse(!is.na(wOBA), "Tier4_Initial", NA_character_))
-  
-  # Combine all matches with priority order
-  final_matches <- bind_rows(
-    tier1_matches %>% filter(!is.na(match_tier)),
-    tier2_matches %>% filter(!is.na(match_tier)),
-    tier3_matches %>% filter(!is.na(match_tier)),
-    tier4_matches %>% filter(!is.na(match_tier))
-  ) %>%
-    group_by(Last_Name, First_Initial, Expected_NECBL_Abbrev) %>%
-    arrange(match(match_tier, c("Tier1_Exact", "Tier2_Team", "Tier3_FullName", "Tier4_Initial"))) %>%
+    filter(!is.na(wOBA)) %>%
+    # For players with same name on multiple teams, create disambiguation info
+    group_by(Last_Name, First_Initial) %>%
+    mutate(
+      name_count = n(),
+      # Flag potential disambiguation issues
+      needs_disambiguation = name_count > 1,
+      # Prefer matches where expected team is close to actual team
+      team_match_score = case_when(
+        Expected_NECBL_Abbrev == Team_Abbrev ~ 3,
+        Expected_NECBL_Team == Team ~ 2,
+        TRUE ~ 1
+      )
+    ) %>%
+    # For ambiguous cases, pick the best team match
+    arrange(desc(team_match_score)) %>%
     slice_head(n = 1) %>%
-    ungroup()
+    ungroup() %>%
+    mutate(match_tier = ifelse(needs_disambiguation, "Tier3_Disambiguated", "Tier3_Name_Only"))
   
-  # Apply matches to ALL model data - PRESERVE EVERYTHING
-  matched_data <- model_with_names %>%
+  # Tier 4: FULL NAME MATCH - When initials might differ
+  unmatched_after_tier3 <- expected_with_names %>%
+    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
+    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team")) %>%
+    anti_join(tier3_matches, by = c("Last_Name", "First_Initial"))
+  
+  tier4_matches <- unmatched_after_tier3 %>%
     left_join(
-      final_matches %>% 
+      necbl_season_data %>% 
+      select(Last_Name, First_Name, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
+      by = c("Last_Name", "First_Name")
+    ) %>%
+    filter(!is.na(wOBA)) %>%
+    group_by(Last_Name, First_Name) %>%
+    slice_head(n = 1) %>%
+    ungroup() %>%
+    mutate(match_tier = "Tier4_Full_Name")
+  
+  # Tier 5: FALLBACK - Last resort for any remaining matches
+  unmatched_after_tier4 <- expected_with_names %>%
+    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
+    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team")) %>%
+    anti_join(tier3_matches, by = c("Last_Name", "First_Initial")) %>%
+    anti_join(tier4_matches, by = c("Last_Name", "First_Name"))
+  
+  tier5_matches <- unmatched_after_tier4 %>%
+    left_join(
+      necbl_season_data %>%
+      group_by(Last_Name, First_Initial) %>%
+      slice_head(n = 1) %>%
+      ungroup() %>%
+      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
+      by = c("Last_Name", "First_Initial")
+    ) %>%
+    filter(!is.na(wOBA)) %>%
+    mutate(match_tier = "Tier5_Fallback")
+  
+  # Combine all successful matches
+  all_matches <- bind_rows(
+    tier1_matches,
+    tier2_matches, 
+    tier3_matches,
+    tier4_matches,
+    tier5_matches
+  )
+  
+  # Apply matches to ALL expected data - PRESERVE EVERYTHING
+  matched_data <- expected_with_names %>%
+    left_join(
+      all_matches %>% 
       select(Last_Name, First_Initial, Expected_NECBL_Abbrev, wOBA, wOBACON, 
-             Season, Team, Team_Abbrev, Player_Season_ID, match_tier), 
+             Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID, match_tier), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")
     ) %>%
     mutate(
-      # OVERLAY Pointstreak data where available
+      # OVERLAY Actual data where available
       actual_woba_final = wOBA,
       actual_wobacon_final = wOBACON,
       
-      # Enhanced data source tracking
+      # Enhanced data source tracking with disambiguation info
       data_source = case_when(
-        match_tier == "Tier1_Exact" ~ paste0("Model + PS (", selected_season, " Exact)"),
-        match_tier == "Tier2_Team" ~ paste0("Model + PS (", selected_season, " Team)"),
-        match_tier == "Tier3_FullName" ~ paste0("Model + PS (", selected_season, " Name)"),
-        match_tier == "Tier4_Initial" ~ paste0("Model + PS (", selected_season, " Initial)"),
-        TRUE ~ "Model Only"
+        match_tier == "Tier1_Exact_Team_Season" ~ paste0("Expected + Actual (", selected_season, " Exact)"),
+        match_tier == "Tier2_Team_Name_Match" ~ paste0("Expected + Actual (", selected_season, " Team)"),
+        match_tier == "Tier3_Disambiguated" ~ paste0("Expected + Actual (", selected_season, " Disambiguated)"),
+        match_tier == "Tier3_Name_Only" ~ paste0("Expected + Actual (", selected_season, " Name)"),
+        match_tier == "Tier4_Full_Name" ~ paste0("Expected + Actual (", selected_season, " Full Name)"),
+        match_tier == "Tier5_Fallback" ~ paste0("Expected + Actual (", selected_season, " Fallback)"),
+        TRUE ~ "Expected Only"
       ),
       
       # Team and season info
-      pointstreak_team_abbrev = Team_Abbrev,
-      pointstreak_season = Season
+      actual_team_abbrev = Team_Abbrev,
+      actual_season = Season,
+      
+      # Add disambiguation tracking
+      player_disambiguation_id = NECBL_Player_ID
     ) %>%
     select(-Last_Name, -First_Initial, -First_Name_Full, -First_Name_Parts, 
            -First_Name, -Middle_Initial, -Expected_NECBL_Team, -Expected_NECBL_Abbrev, 
-           -Model_Player_ID, -wOBA, -wOBACON, -Season, -Team, -Team_Abbrev, 
-           -Player_Season_ID, -match_tier)
+           -Expected_Player_ID, -wOBA, -wOBACON, -Season, -Team, -Team_Abbrev, 
+           -Player_Season_ID, -NECBL_Player_ID, -match_tier)
   
-  # Summary with match quality breakdown
+  # Enhanced summary with disambiguation tracking
   total_records <- nrow(matched_data)
-  pointstreak_overlay <- sum(!is.na(matched_data$actual_woba_final))
+  actual_overlay <- sum(!is.na(matched_data$actual_woba_final))
   
   match_summary <- matched_data %>%
     filter(!is.na(actual_woba_final)) %>%
     count(data_source, name = "matches")
   
-  cat("=== MATCHING SUMMARY FOR", selected_season, "===\n")
-  cat("- TOTAL MODEL RECORDS PRESERVED:", total_records, "(100%)\n")
-  cat("- Records with Pointstreak overlay:", pointstreak_overlay, "\n")
-  cat("- Overlay rate:", round(pointstreak_overlay / total_records * 100, 1), "%\n")
+  # Check for disambiguation issues
+  disambiguation_check <- all_matches %>%
+    filter(!is.na(wOBA)) %>%
+    group_by(Last_Name, First_Initial) %>%
+    summarise(
+      player_count = n(),
+      teams = paste(unique(Team_Abbrev), collapse = ", "),
+      disambiguation_needed = n() > 1,
+      .groups = "drop"
+    ) %>%
+    filter(disambiguation_needed)
+  
+  cat("=== ENHANCED MATCHING SUMMARY FOR", selected_season, "===\n")
+  cat("- TOTAL EXPECTED RECORDS PRESERVED:", total_records, "(100%)\n")
+  cat("- Records with Actual overlay:", actual_overlay, "\n")
+  cat("- Overlay rate:", round(actual_overlay / total_records * 100, 1), "%\n")
   
   if (nrow(match_summary) > 0) {
     cat("- Match quality breakdown:\n")
@@ -558,9 +678,16 @@ match_necbl_data <- function(model_data, necbl_data, selected_season = "2025") {
     }
   }
   
+  if (nrow(disambiguation_check) > 0) {
+    cat("- Players requiring disambiguation:\n")
+    for (i in 1:nrow(disambiguation_check)) {
+      cat("  *", disambiguation_check$Last_Name[i], disambiguation_check$First_Initial[i], 
+          "- Teams:", disambiguation_check$teams[i], "\n")
+    }
+  }
+  
   return(matched_data)
 }
-
 # Load all seasons with progress tracking
 get_all_necbl_seasons <- function(progress_callback = NULL) {
   cat("=== LOADING ALL NECBL SEASONS (2021-2025) ===\n")
@@ -614,12 +741,12 @@ initialize_enhanced_data <- function() {
     # Ensure proper xwOBA/xwOBACON separation
     if (!"predicted_xwobacon_final" %in% names(base_data)) {
       cat("Recalculating xwOBA/xwOBACON separation...\n")
-      base_data <- calculate_model_xwoba_and_full(base_data, if(exists("model")) model else NULL)
+      base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
     }
     
   } else if (exists("raw_data") && is.data.frame(raw_data) && nrow(raw_data) > 0) {
-    cat("Using raw_data and applying model calculations\n")
-    base_data <- calculate_model_xwoba_and_full(raw_data, if(exists("model")) model else NULL)
+    cat("Using raw_data and applying expected calculations\n")
+    base_data <- calculate_expected_xwoba_and_full(raw_data, if(exists("expected")) expected else NULL)
     
   } else {
     cat("No existing data found - create sample data first\n")
@@ -632,18 +759,17 @@ initialize_enhanced_data <- function() {
       predicted_xwoba_final = if("predicted_xwoba_final" %in% names(.)) predicted_xwoba_final else 0.350,
       predicted_xwobacon_final = if("predicted_xwobacon_final" %in% names(.)) predicted_xwobacon_final else 0.400,
       
-      # Initialize Pointstreak overlay columns
+      # Initialize Actual overlay columns
       actual_woba_final = NA_real_,
       actual_wobacon_final = NA_real_,
-      data_source = "Model Only",
-      pointstreak_team_abbrev = NA_character_,
-      pointstreak_season = NA_character_
+      data_source = "Expected Only",
+      actual_team_abbrev = NA_character_,
+      actual_season = NA_character_
     )
   
   cat("Enhanced data initialized with", nrow(final_data), "total records\n")
   return(final_data)
 }
-
 # ===================================================================
 # SHINY UI
 # ===================================================================
@@ -657,8 +783,7 @@ ui <- dashboardPage(
       menuItem("Underperformers", tabName = "underperform", icon = icon("arrow-down")),
       menuItem("Overperformers", tabName = "overperform", icon = icon("arrow-up")),
       menuItem("Player Comparison", tabName = "comparison", icon = icon("balance-scale")),
-      menuItem("Team Browser", tabName = "browser", icon = icon("table")),
-      menuItem("Data Management", tabName = "data", icon = icon("database"))
+      menuItem("Team Browser", tabName = "browser", icon = icon("table"))
     )
   ),
   
@@ -671,7 +796,7 @@ ui <- dashboardPage(
         .season-highlight {
           background-color: #fff3cd !important;
         }
-        .pointstreak-match {
+        .actual-match {
           background-color: #d4edda !important;
         }
         .box-solid > .box-header {
@@ -757,7 +882,7 @@ ui <- dashboardPage(
           box(
             title = "Players Getting Unlucky (Expected > Actual)", 
             status = "success", solidHeader = TRUE, width = 12,
-            p(paste("Players whose model predictions exceed their actual Pointstreak results.",
+            p(paste("Players whose expected predictions exceed their actual results.",
                    "These players may be due for positive regression.")),
             DT::dataTableOutput("underperformers_table")
           )
@@ -770,7 +895,7 @@ ui <- dashboardPage(
           box(
             title = "Players Getting Lucky (Actual > Expected)", 
             status = "warning", solidHeader = TRUE, width = 12,
-            p(paste("Players whose actual Pointstreak results exceed their model predictions.",
+            p(paste("Players whose actual results exceed their expected predictions.",
                    "These players may be due for negative regression.")),
             DT::dataTableOutput("overperformers_table")
           )
@@ -821,7 +946,7 @@ ui <- dashboardPage(
                                              "xwOBACON" = "Avg_xwOBACON", "wOBACON" = "Avg_wOBACON", 
                                              "PAs" = "PA_Count"),
                                    selected = "Avg_xwOBA")),
-              column(3, checkboxInput("show_only_matched", "Show Only Pointstreak Matches", value = FALSE))
+              column(3, checkboxInput("show_only_matched", "Show Only Actual Matches", value = FALSE))
             )
           )
         ),
@@ -832,42 +957,10 @@ ui <- dashboardPage(
             DT::dataTableOutput("browser_table")
           )
         )
-      ),
-      
-      # Data Management Tab
-      tabItem(tabName = "data",
-        fluidRow(
-          box(
-            title = "Data Loading Status", status = "primary", solidHeader = TRUE, width = 6,
-            verbatimTextOutput("data_info"),
-            hr(),
-            h4("Available Actions:"),
-            actionButton("refresh_current", "Refresh Current Season", 
-                        class = "btn btn-primary", icon = icon("refresh")),
-            br(), br(),
-            actionButton("clear_cache", "Clear All Cached Data", 
-                        class = "btn btn-warning", icon = icon("trash"))
-          ),
-          
-          box(
-            title = "Match Quality Analysis", status = "info", solidHeader = TRUE, width = 6,
-            DT::dataTableOutput("match_quality_summary"),
-            hr(),
-            plotOutput("match_quality_plot", height = "300px")
-          )
-        ),
-        
-        fluidRow(
-          box(
-            title = "Season-by-Season Breakdown", status = "success", solidHeader = TRUE, width = 12,
-            DT::dataTableOutput("season_breakdown")
-          )
-        )
       )
     )
   )
 )
-
 # ===================================================================
 # SHINY SERVER
 # ===================================================================
@@ -876,7 +969,7 @@ server <- function(input, output, session) {
   
   # Enhanced reactive values with proper season management
   values <- reactiveValues(
-    model_data = NULL,
+    expected_data = NULL,
     necbl_data_all = NULL,
     necbl_data_current = NULL,
     enhanced_data = NULL,
@@ -887,11 +980,11 @@ server <- function(input, output, session) {
   
   # Initialize with your existing data
   observe({
-    if (is.null(values$model_data)) {
-      values$model_data <- initialize_enhanced_data()
-      if (!is.null(values$model_data)) {
-        values$enhanced_data <- values$model_data
-        cat("Initialized with", nrow(values$enhanced_data), "model records\n")
+    if (is.null(values$expected_data)) {
+      values$expected_data <- initialize_enhanced_data()
+      if (!is.null(values$expected_data)) {
+        values$enhanced_data <- values$expected_data
+        cat("Initialized with", nrow(values$enhanced_data), "expected records\n")
       }
     }
   })
@@ -906,12 +999,17 @@ server <- function(input, output, session) {
       return(data.frame())
     }
     
-    # Apply season filter
+    # Apply season filter - FIXED to properly filter by selected season
     if (!is.null(input$season_scope) && input$season_scope == "selected" && 
-        !is.null(input$primary_season) && 
-        "pointstreak_season" %in% names(current_data)) {
-      current_data <- current_data %>%
-        filter(is.na(pointstreak_season) | pointstreak_season == input$primary_season)
+        !is.null(input$primary_season)) {
+      
+      # For browser and other tabs, show only players with actual data from selected season
+      if ("actual_season" %in% names(current_data)) {
+        current_data <- current_data %>%
+          filter(actual_season == input$primary_season | is.na(actual_season)) %>%
+          # If they have actual data, it must be from the selected season
+          filter(is.na(actual_woba_final) | actual_season == input$primary_season)
+      }
     }
     
     # Apply PA threshold
@@ -953,22 +1051,21 @@ server <- function(input, output, session) {
         nrow()
       matched_players <- sum(!is.na(values$enhanced_data$actual_woba_final))
       
-      paste("✓", total_players, "players,", matched_players, "with Pointstreak data")
+      paste("✓", total_players, "players,", matched_players, "with actual data")
     } else if (!is.null(values$enhanced_data)) {
       total_players <- values$enhanced_data %>% 
         distinct(Batter) %>% 
         nrow()
-      paste("Model only:", total_players, "players")
+      paste("Expected only:", total_players, "players")
     } else {
       "No data loaded"
     }
   })
-  
-  # Load selected season
+# Load selected season
   observeEvent(input$load_season, {
     withProgress(message = paste('Loading', input$primary_season, 'season...'), value = 0, {
       
-      incProgress(0.3, detail = "Scraping Pointstreak data...")
+      incProgress(0.3, detail = "Scraping actual data...")
       
       tryCatch({
         # Scrape selected season
@@ -989,20 +1086,20 @@ server <- function(input, output, session) {
           values$available_seasons <- unique(values$necbl_data_all$Season)
           values$last_update <- Sys.time()
           
-          incProgress(0.6, detail = "Matching with model data...")
+          incProgress(0.6, detail = "Matching with expected data...")
           
-          # Re-match with model data
-          if (!is.null(values$model_data)) {
-            values$enhanced_data <- match_necbl_data(values$model_data, values$necbl_data_all, input$primary_season)
+          # Re-match with expected data
+          if (!is.null(values$expected_data)) {
+            values$enhanced_data <- match_necbl_data(values$expected_data, values$necbl_data_all, input$primary_season)
           }
           
           incProgress(1.0, detail = "Complete!")
           
           total_records <- nrow(values$enhanced_data)
-          pointstreak_records <- sum(!is.na(values$enhanced_data$actual_woba_final))
+          actual_records <- sum(!is.na(values$enhanced_data$actual_woba_final))
           
           showNotification(
-            paste("✅", input$primary_season, "season loaded!", pointstreak_records, "players matched"),
+            paste("✅", input$primary_season, "season loaded!", actual_records, "players matched"),
             type = "message", duration = 8 
           )
         } else {
@@ -1039,11 +1136,11 @@ server <- function(input, output, session) {
           values$available_seasons <- unique(values$necbl_data_all$Season)
           values$last_update <- Sys.time()
           
-          incProgress(0.9, detail = "Matching with model data...")
+          incProgress(0.9, detail = "Matching with expected data...")
           
-          # Re-match with model data
-          if (!is.null(values$model_data)) {
-            values$enhanced_data <- match_necbl_data(values$model_data, values$necbl_data_all, input$primary_season)
+          # Re-match with expected data
+          if (!is.null(values$expected_data)) {
+            values$enhanced_data <- match_necbl_data(values$expected_data, values$necbl_data_all, input$primary_season)
           }
           
           incProgress(1.0, detail = "All seasons loaded!")
@@ -1064,8 +1161,7 @@ server <- function(input, output, session) {
       })
     })
   })
-  
-  # Enhanced performance plot with plotly
+# Enhanced performance plot with plotly
   output$performance_plotly <- renderPlotly({
     current_data <- get_filtered_data()
     
@@ -1093,18 +1189,18 @@ server <- function(input, output, session) {
         xwOBACON = mean(predicted_xwobacon_final, na.rm = TRUE),
         wOBACON = mean(actual_wobacon_final, na.rm = TRUE),
         PA_Count = n(),
-        Has_Pointstreak = !all(is.na(actual_woba_final)),
+        Has_Actual = !all(is.na(actual_woba_final)),
         Data_Source = first(data_source),
         Team = first(BatterTeam),
-        PS_Season = first(pointstreak_season),
+        Actual_Season = first(actual_season),
         .groups = "drop"
       ) %>%
-      filter(Has_Pointstreak)
+      filter(Has_Actual)
     
     if (nrow(player_performance) == 0) {
       p <- ggplot() + 
         geom_text(aes(x = 0.5, y = 0.5, 
-                     label = paste0("No players with ", input$primary_season, " Pointstreak data\n\nClick 'Load Selected Season' or 'Load All Seasons'")), 
+                     label = paste0("No players with ", input$primary_season, " actual data\n\nClick 'Load Selected Season' or 'Load All Seasons'")), 
                   size = 6, color = "#667eea") +
         theme_void()
       return(ggplotly(p))
@@ -1113,16 +1209,16 @@ server <- function(input, output, session) {
     # Select metrics based on input
     if (input$metric_type == "xwoba") {
       plot_data <- player_performance %>%
-        select(Batter, xwOBA, wOBA, PA_Count, Data_Source, Team, PS_Season) %>%
+        select(Batter, xwOBA, wOBA, PA_Count, Data_Source, Team, Actual_Season) %>%
         rename(Expected = xwOBA, Actual = wOBA)
-      x_label <- paste("wOBA (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBA (Your Model)"
+      x_label <- paste("wOBA (Actual", input$primary_season, ")")
+      y_label <- "xwOBA (Expected)"
     } else {
       plot_data <- player_performance %>%
-        select(Batter, xwOBACON, wOBACON, PA_Count, Data_Source, Team, PS_Season) %>%
+        select(Batter, xwOBACON, wOBACON, PA_Count, Data_Source, Team, Actual_Season) %>%
         rename(Expected = xwOBACON, Actual = wOBACON)
-      x_label <- paste("wOBACON (Pointstreak", input$primary_season, ")")
-      y_label <- "xwOBACON (Your Model)"
+      x_label <- paste("wOBACON (Actual", input$primary_season, ")")
+      y_label <- "xwOBACON (Expected)"
     }
     
     # Create enhanced scatter plot
@@ -1134,15 +1230,14 @@ server <- function(input, output, session) {
       "<br>Actual:", round(Actual, 3),
       "<br>Difference:", round(Expected - Actual, 3)
     ))) +
-      geom_point(aes(size = PA_Count, color = Data_Source), alpha = 0.7) +
+      geom_point(aes(color = Data_Source), size = 4, alpha = 0.7) +
       geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#dc3545", size = 1) +
-      scale_size_continuous(name = "PAs", range = c(3, 12)) +
       scale_color_manual(values = setNames(
         c("#28a745", "#20c997", "#fd7e14", "#ffc107"),
-        c(paste0("Model + PS (", input$primary_season, " Exact)"),
-          paste0("Model + PS (", input$primary_season, " Team)"),
-          paste0("Model + PS (", input$primary_season, " Name)"),
-          paste0("Model + PS (", input$primary_season, " Initial)"))
+        c(paste0("Expected + Actual (", input$primary_season, " Exact)"),
+          paste0("Expected + Actual (", input$primary_season, " Team)"),
+          paste0("Expected + Actual (", input$primary_season, " Name)"),
+          paste0("Expected + Actual (", input$primary_season, " Initial)"))
       )) +
       labs(title = plot_title,
            x = x_label, y = y_label, color = "Match Quality") +
@@ -1159,8 +1254,7 @@ server <- function(input, output, session) {
         showlegend = TRUE
       )
   })
-  
-  # Performance summary table
+# Performance summary table
   output$performance_summary <- DT::renderDataTable({
     current_data <- get_filtered_data()
     
@@ -1176,7 +1270,7 @@ server <- function(input, output, session) {
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        PS_Season = first(pointstreak_season),
+        Actual_Season = first(actual_season),
         .groups = "drop"
       ) %>%
       mutate(
@@ -1191,7 +1285,7 @@ server <- function(input, output, session) {
       rownames = FALSE
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
-      formatStyle('PS_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd')) %>%
+      formatStyle('Actual_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd')) %>%
       formatStyle(columns = c('wOBA_Diff', 'wOBACON_Diff'), 
                   backgroundColor = styleInterval(c(-0.025, 0.025), c('#f8d7da', '#ffffff', '#d4edda')))
   })
@@ -1210,9 +1304,9 @@ server <- function(input, output, session) {
         wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Model_Team = first(BatterTeam),
-        PS_Team = first(pointstreak_team_abbrev),
-        PS_Season = first(pointstreak_season),
+        Expected_Team = first(BatterTeam),
+        Actual_Team = first(actual_team_abbrev),
+        Actual_Season = first(actual_season),
         Data_Source = first(data_source),
         .groups = "drop"
       ) %>%
@@ -1231,10 +1325,9 @@ server <- function(input, output, session) {
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
       formatStyle(c('wOBA_Diff', 'wOBACON_Diff'), backgroundColor = '#d4edda') %>%
-      formatStyle('PS_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
+      formatStyle('Actual_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
   })
-  
-  # Overperformers table
+# Overperformers table
   output$overperformers_table <- DT::renderDataTable({
     current_data <- get_filtered_data()
     pa_threshold <- max(20, as.numeric(input$pa_threshold %||% 0))
@@ -1248,9 +1341,9 @@ server <- function(input, output, session) {
         wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Model_Team = first(BatterTeam),
-        PS_Team = first(pointstreak_team_abbrev),
-        PS_Season = first(pointstreak_season),
+        Expected_Team = first(BatterTeam),
+        Actual_Team = first(actual_team_abbrev),
+        Actual_Season = first(actual_season),
         Data_Source = first(data_source),
         .groups = "drop"
       ) %>%
@@ -1269,7 +1362,7 @@ server <- function(input, output, session) {
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
       formatStyle(c('wOBA_Diff', 'wOBACON_Diff'), backgroundColor = '#f8d7da') %>%
-      formatStyle('PS_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
+      formatStyle('Actual_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
   })
   
   # Player comparison plot
@@ -1302,7 +1395,7 @@ server <- function(input, output, session) {
         pivot_longer(cols = starts_with("Cumulative"), names_to = "Metric", values_to = "Value") %>%
         mutate(
           Metric = gsub("Cumulative_", "", Metric),
-          Line_Type = ifelse(grepl("x", Metric), "Expected (Model)", paste("Actual (PS", input$primary_season, ")")),
+          Line_Type = ifelse(grepl("x", Metric), "Expected", paste("Actual (", input$primary_season, ")")),
           Metric_Type = ifelse(grepl("OBACON", Metric), "wOBACON (Batted Balls)", "wOBA (All PAs)")
         ) %>%
         filter(!is.na(Value))
@@ -1313,7 +1406,7 @@ server <- function(input, output, session) {
         scale_color_manual(values = c("#667eea", "#764ba2")) +
         scale_linetype_manual(values = setNames(
           c("solid", "dashed"),
-          c("Expected (Model)", paste0("Actual (PS ", input$primary_season, ")"))
+          c("Expected", paste0("Actual (", input$primary_season, ")"))
         )) +
         labs(title = paste("Performance Comparison:", input$comp_player1, "vs", input$comp_player2),
              subtitle = paste("Cumulative performance -", input$primary_season, "season focus"),
@@ -1330,8 +1423,7 @@ server <- function(input, output, session) {
         theme_void()
     }
   })
-  
-  # Comparison summary table
+# Comparison summary table
   output$comparison_summary_table <- DT::renderDataTable({
     req(input$comp_player1, input$comp_player2)
     
@@ -1353,9 +1445,9 @@ server <- function(input, output, session) {
         Avg_wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
         wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Model_Team = first(BatterTeam),
-        PS_Team = first(pointstreak_team_abbrev),
-        PS_Season = first(pointstreak_season),
+        Expected_Team = first(BatterTeam),
+        Actual_Team = first(actual_team_abbrev),
+        Actual_Season = first(actual_season),
         Data_Source = first(data_source),
         .groups = "drop"
       )
@@ -1367,7 +1459,7 @@ server <- function(input, output, session) {
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_xwOBACON', 'Avg_wOBACON', 'wOBA_Gap', 'wOBACON_Gap'), digits = 3) %>%
-      formatStyle('PS_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
+      formatStyle('Actual_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
   })
   
   # Team browser table
@@ -1394,17 +1486,23 @@ server <- function(input, output, session) {
         Avg_wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
         wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Model_Team = first(BatterTeam),
-        PS_Team = first(pointstreak_team_abbrev),
-        PS_Season = first(pointstreak_season),
+        Expected_Team = first(BatterTeam),
+        Actual_Team = first(actual_team_abbrev),
+        Actual_Season = first(actual_season),
         Data_Source = first(data_source),
-        Has_Pointstreak = !all(is.na(actual_woba_final)),
+        Has_Actual = !all(is.na(actual_woba_final)),
         .groups = "drop"
       )
     
-    # Apply Pointstreak filter if requested
+    # Apply actual filter if requested
     if (!is.null(input$show_only_matched) && input$show_only_matched) {
-      browser_data <- browser_data %>% filter(Has_Pointstreak)
+      browser_data <- browser_data %>% filter(Has_Actual)
+    }
+    
+    # IMPORTANT: Only show players with actual data from the selected season
+    if (!is.null(input$season_scope) && input$season_scope == "selected") {
+      browser_data <- browser_data %>% 
+        filter(Has_Actual & Actual_Season == input$primary_season)
     }
     
     browser_data <- browser_data %>%
@@ -1417,165 +1515,8 @@ server <- function(input, output, session) {
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_xwOBACON', 'Avg_wOBACON', 'wOBA_Gap', 'wOBACON_Gap'), digits = 3) %>%
-      formatStyle("Has_Pointstreak", backgroundColor = styleEqual(TRUE, '#d4edda')) %>%
-      formatStyle('PS_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
-  })
-  
-  # Data management outputs
-  output$data_info <- renderText({
-    info_text <- "=== DATA STATUS ===\n"
-    
-    if (!is.null(values$model_data)) {
-      model_players <- values$model_data %>% distinct(Batter) %>% nrow()
-      model_records <- nrow(values$model_data)
-      info_text <- paste0(info_text, "Model Data: ", model_players, " players, ", model_records, " records\n")
-    } else {
-      info_text <- paste0(info_text, "Model Data: Not loaded\n")
-    }
-    
-    if (!is.null(values$necbl_data_all)) {
-      ps_seasons <- length(unique(values$necbl_data_all$Season))
-      ps_players <- nrow(values$necbl_data_all)
-      info_text <- paste0(info_text, "Pointstreak Data: ", ps_seasons, " seasons, ", ps_players, " player-season records\n")
-      info_text <- paste0(info_text, "Available Seasons: ", paste(sort(values$available_seasons), collapse = ", "), "\n")
-    } else {
-      info_text <- paste0(info_text, "Pointstreak Data: Not loaded\n")
-    }
-    
-    if (!is.null(values$enhanced_data)) {
-      matched_records <- sum(!is.na(values$enhanced_data$actual_woba_final))
-      total_records <- nrow(values$enhanced_data)
-      match_rate <- round(matched_records / total_records * 100, 1)
-      info_text <- paste0(info_text, "Enhanced Data: ", total_records, " total records\n")
-      info_text <- paste0(info_text, "Pointstreak Matches: ", matched_records, " (", match_rate, "%)\n")
-    }
-    
-    if (!is.null(values$last_update)) {
-      info_text <- paste0(info_text, "Last Update: ", format(values$last_update, "%Y-%m-%d %H:%M:%S"), "\n")
-    }
-    
-    return(info_text)
-  })
-  
-  # Match quality summary
-  output$match_quality_summary <- DT::renderDataTable({
-    if (is.null(values$enhanced_data)) return(data.frame())
-    
-    match_summary <- values$enhanced_data %>%
-      filter(!is.na(actual_woba_final)) %>%
-      group_by(data_source, pointstreak_season) %>%
-      summarise(
-        Players = n_distinct(Batter),
-        Records = n(),
-        Avg_xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        Avg_wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        Avg_Diff = round(mean(predicted_xwoba_final - actual_woba_final, na.rm = TRUE), 3),
-        .groups = "drop"
-      ) %>%
-      arrange(desc(Records))
-    
-    DT::datatable(
-      match_summary,
-      options = list(pageLength = 10, scrollX = TRUE),
-      caption = "Match Quality Breakdown",
-      rownames = FALSE
-    ) %>%
-      formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_Diff'), digits = 3)
-  })
-  
-  # Match quality plot
-  output$match_quality_plot <- renderPlot({
-    if (is.null(values$enhanced_data)) return(ggplot() + theme_void())
-    
-    match_data <- values$enhanced_data %>%
-      filter(!is.na(actual_woba_final)) %>%
-      mutate(
-        Match_Type = case_when(
-          grepl("Exact", data_source) ~ "Exact Match",
-          grepl("Team", data_source) ~ "Team Match", 
-          grepl("Name", data_source) ~ "Name Match",
-          grepl("Initial", data_source) ~ "Initial Match",
-          TRUE ~ "Other"
-        )
-      ) %>%
-      count(Match_Type, pointstreak_season) %>%
-      mutate(pointstreak_season = factor(pointstreak_season))
-    
-    ggplot(match_data, aes(x = Match_Type, y = n, fill = pointstreak_season)) +
-      geom_col(position = "dodge") +
-      scale_fill_brewer(type = "qual", palette = "Set3") +
-      labs(title = "Match Quality by Season",
-           x = "Match Type", y = "Number of Players",
-           fill = "Season") +
-      theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  })
-  
-  # Season breakdown table
-  output$season_breakdown <- DT::renderDataTable({
-    if (is.null(values$necbl_data_all)) return(data.frame())
-    
-    season_breakdown <- values$necbl_data_all %>%
-      group_by(Season, Team_Abbrev) %>%
-      summarise(
-        Players = n(),
-        Avg_wOBA = round(mean(wOBA, na.rm = TRUE), 3),
-        Avg_wOBACON = round(mean(wOBACON, na.rm = TRUE), 3),
-        Total_PAs = sum(PA, na.rm = TRUE),
-        Avg_PAs = round(mean(PA, na.rm = TRUE), 1),
-        .groups = "drop"
-      ) %>%
-      arrange(desc(Season), Team_Abbrev)
-    
-    DT::datatable(
-      season_breakdown,
-      options = list(pageLength = 20, scrollX = TRUE),
-      caption = "Season-by-Season Team Breakdown",
-      rownames = FALSE
-    ) %>%
-      formatRound(columns = c('Avg_wOBA', 'Avg_wOBACON', 'Avg_PAs'), digits = 3) %>%
-      formatStyle('Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
-  })
-  
-  # Clear cache action
-  observeEvent(input$clear_cache, {
-    showModal(modalDialog(
-      title = "Clear All Data",
-      "Are you sure you want to clear all cached Pointstreak data? This will reset the dashboard to model-only data.",
-      footer = tagList(
-        actionButton("confirm_clear", "Yes, Clear All", class = "btn btn-danger"),
-        modalButton("Cancel")
-      )
-    ))
-  })
-  
-  observeEvent(input$confirm_clear, {
-    values$necbl_data_all <- NULL
-    values$necbl_data_current <- NULL
-    values$available_seasons <- character(0)
-    values$last_update <- NULL
-    
-    if (!is.null(values$model_data)) {
-      values$enhanced_data <- values$model_data %>%
-        mutate(
-          actual_woba_final = NA_real_,
-          actual_wobacon_final = NA_real_,
-          data_source = "Model Only",
-          pointstreak_team_abbrev = NA_character_,
-          pointstreak_season = NA_character_
-        )
-    }
-    
-    removeModal()
-    showNotification("✅ All cached data cleared. Dashboard reset to model-only mode.", type = "message")
-  })
-  
-  # Refresh current season
-  observeEvent(input$refresh_current, {
-    if (!is.null(input$primary_season)) {
-      # Trigger the same action as load_season
-      shinyjs::click("load_season")
-    }
+      formatStyle("Has_Actual", backgroundColor = styleEqual(TRUE, '#d4edda')) %>%
+      formatStyle('Actual_Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
   })
 }
 
@@ -1587,14 +1528,14 @@ server <- function(input, output, session) {
 launch_xwoba_dashboard <- function() {
   # Check if required data exists
   if (!exists("combined_df") && !exists("raw_data")) {
-    stop("No model data found. Please ensure 'combined_df' or 'raw_data' exists in your environment.")
+    stop("No expected data found. Please ensure 'combined_df' or 'raw_data' exists in your environment.")
   }
   
   cat("🎯 Launching Enhanced xwOBA Dashboard...\n")
   cat("✅ Season-specific player parsing\n")
   cat("✅ 4-tier player matching system\n") 
   cat("✅ Interactive Plotly visualizations\n")
-  cat("✅ Comprehensive data management\n")
+  cat("✅ Comprehensive performance analysis\n")
   
   shinyApp(ui = ui, server = server)
 }
@@ -1608,7 +1549,6 @@ cat("✅ Season-Specific Parsing: Each player-season treated as unique\n")
 cat("✅ 4-Tier Matching: Exact > Team > Name > Initial fallback\n")
 cat("✅ Default 2025 Focus: Shows current season by default\n")
 cat("✅ Interactive Plots: Plotly integration for better exploration\n")
-cat("✅ Data Management: Load single seasons or all 2021-2025\n")
 cat("✅ Enhanced Tables: Color-coded by season and match quality\n\n")
 cat("🔧 FIXED ISSUES:\n")
 cat("❌ No more multi-season player contamination\n")
@@ -1622,6 +1562,6 @@ cat("3. Or 'Load All Seasons' for comprehensive analysis\n")
 cat("4. Use season controls to focus analysis\n")
 cat("5. Explore tabs for different analytical views\n\n")
 cat("💡 REQUIREMENTS:\n")
-cat("- Your model data must exist as 'combined_df' or 'raw_data'\n")
-cat("- Internet connection for Pointstreak scraping\n")
+cat("- Your expected data must exist as 'combined_df' or 'raw_data'\n")
+cat("- Internet connection for actual data scraping\n")
 cat("- Required packages: shiny, shinydashboard, DT, ggplot2, dplyr, tidyr, rvest, httr, stringr, xml2, plotly\n")
