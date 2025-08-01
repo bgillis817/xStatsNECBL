@@ -445,13 +445,15 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
   # 4-tier matching strategy
   
   # Tier 1: Exact match (Last + First + Team + Season)
-  tier1_matches <- expected_with_names %>%
-    left_join(
-      necbl_season_data %>% 
-      select(Last_Name, First_Initial, Team_Abbrev, wOBA, wOBACON, Season, Team, Player_Season_ID), 
-      by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev" = "Team_Abbrev")
-    ) %>%
-    mutate(match_tier = ifelse(!is.na(wOBA), "Tier1_Exact", NA_character_))
+  tier1_matches <-expected_with_names %>% left_join(
+necbl_season_data %>%
+select(Player_Season_ID,
+WOBA, WOBACON, Team, Season),
+by = "Player_Season_ID"
+) %>%
+mutate(match_tier = ifelse(!
+is.na(wOBA), "Tier1_Exact",
+NA_character_))
   
   # Tier 2: Team + Name match (for team name vs abbrev mismatches)
   tier2_matches <- tier1_matches %>%
