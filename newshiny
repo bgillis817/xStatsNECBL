@@ -1,4 +1,6 @@
-#  xwOBA Dashboard - Complete R Shiny Integration
+# Enhanced xwOBA Dashboard - Complete R Shiny Integration
+# Fixes: Season-specific parsing, player disambiguation, proper PA integration
+
 # ===================================================================
 # REQUIRED LIBRARIES
 # ===================================================================
@@ -139,82 +141,20 @@ calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
 # NECBL TEAM MAPPING & SEASON-SPECIFIC SCRAPING
 # ===================================================================
 
-# ===================================================================
-# NECBL TEAM MAPPING & SEASON-SPECIFIC SCRAPING
-# ===================================================================
-
-# Enhanced team mapping with team IDs
 necbl_team_mapping <- list(
-  "BRI_B" = list(
-    name = "Bristol Blues", 
-    abbrev = "BRI",
-    team_id = "89490"
-  ),
-  "DAN_WES" = list(
-    name = "Danbury Westerners", 
-    abbrev = "DAN",
-    team_id = "6402"
-  ),
-  "KEE_SWA" = list(
-    name = "Keene SwampBats", 
-    abbrev = "KSB",
-    team_id = "6401"
-  ),
-  "MYS_SCH" = list(
-    name = "Mystic Schooners", 
-    abbrev = "MSC",
-    team_id = "11912"
-  ),
-  "MAR_VIN" = list(
-    name = "Martha's Vineyard Sharks", 
-    abbrev = "MV",
-    team_id = "142675"
-  ),
-  "NEW_GUL" = list(
-    name = "Newport Gulls", 
-    abbrev = "NG",
-    team_id = "6458"
-  ),
-  "NOR_ADA" = list(
-    name = "North Adams Steeplecats", 
-    abbrev = "NSC",
-    team_id = "6404"
-  ),
-  "NSH_N" = list(
-    name = "North Shore Navigators", 
-    abbrev = "NSN",
-    team_id = "154432"
-  ),
-  "OCE_STA" = list(
-    name = "Ocean State Waves", 
-    abbrev = "OSW",
-    team_id = "51489"
-  ),
-  "OCE_STA6" = list(
-    name = "Ocean State Waves", 
-    abbrev = "OSW",
-    team_id = "51489"
-  ),
-  "SAN_MAI" = list(
-    name = "Sanford Mainers", 
-    abbrev = "SM",
-    team_id = "6459"
-  ),
-  "UPP_VAL" = list(
-    name = "Upper Valley Nighthawks", 
-    abbrev = "UVNH",
-    team_id = "104040"
-  ),
-  "VAL_BLU" = list(
-    name = "Valley Blue Sox", 
-    abbrev = "VAL",
-    team_id = "6403"
-  ),
-  "VER_MOU" = list(
-    name = "Vermont Mountaineers", 
-    abbrev = "VM",
-    team_id = "6405"
-  )
+  "BRI_B" = list(name = "Bristol Blues", abbrev = "BRI"),
+  "DAN_WES" = list(name = "Danbury Westerners", abbrev = "DAN"),
+  "KEE_SWA" = list(name = "Keene SwampBats", abbrev = "KSB"),
+  "MAR_VIN" = list(name = "Martha's Vineyard Sharks", abbrev = "MV"),
+  "MYS_SCH" = list(name = "Mystic Schooners", abbrev = "MSC"),
+  "NEW_GUL" = list(name = "Newport Gulls", abbrev = "NG"),
+  "NOR_ADA" = list(name = "North Adams Steeplecats", abbrev = "NSC"),
+  "NSH_N" = list(name = "North Shore Navigators", abbrev = "NSN"),
+  "OCE_STA" = list(name = "Ocean State Waves", abbrev = "OSW"),
+  "SAN_MAI" = list(name = "Sanford Mainers", abbrev = "SM"),
+  "UPP_VAL" = list(name = "Upper Valley Nighthawks", abbrev = "UVNH"),
+  "VAL_BLU" = list(name = "Valley Blue Sox", abbrev = "VAL"),
+  "VER_MOU" = list(name = "Vermont Mountaineers", abbrev = "VM")
 )
 
 # NECBL URLs by season with proper season IDs
@@ -226,7 +166,7 @@ necbl_urls_by_season <- list(
   "2021" = list(seasonid = "33089")
 )
 
-# Team IDs for URL construction (extracted from enhanced mapping)
+# Team IDs for URL construction
 team_ids <- list(
   "Bristol Blues" = "89490",
   "Danbury Westerners" = "6402",
@@ -445,7 +385,7 @@ get_necbl_woba_by_season <- function(season = "2025") {
   cat("Total players with calculated wOBA/wOBACON for", season, ":", nrow(all_woba), "\n")
   return(all_woba)
 }
-# Enhanced matching function with improved player disambiguation
+# Enhanced matching function with 4-tier strategy
 match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025") {
   cat("=== MATCHING EXPECTED DATA WITH ACTUAL OVERLAY ===\n")
   cat("Expected records (PRIMARY):", nrow(expected_data), "\n")
@@ -483,14 +423,8 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
         if (!is.null(team_info)) team_info$abbrev else NA_character_
       }),
       
-      # Create enhanced player identifier with team disambiguation
-      Expected_Player_ID = paste(Last_Name, First_Initial, Expected_NECBL_Abbrev, selected_season, sep = "_")
-    )
-  
-  # Create enhanced NECBL identifiers for better disambiguation
-  necbl_season_data <- necbl_season_data %>%
-    mutate(
-      NECBL_Player_ID = paste(Last_Name, First_Initial, Team_Abbrev, Season, sep = "_")
+      # Create expected player identifier
+      Expected_Player_ID = paste(Last_Name, First_Initial, Expected_NECBL_Abbrev, sep = "_")
     )
   
   # If no NECBL data for selected season, return expected-only
@@ -508,114 +442,73 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
            ))
   }
   
-  # ENHANCED 5-tier matching strategy with better disambiguation
+  # 4-tier matching strategy
   
-  # Tier 1: EXACT MATCH - Last + First + Team + Season (Most Precise)
+  # Tier 1: Exact match (Last + First + Team + Season)
   tier1_matches <- expected_with_names %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Initial, Team_Abbrev, Season, wOBA, wOBACON, Team, Player_Season_ID, NECBL_Player_ID), 
+      select(Last_Name, First_Initial, Team_Abbrev, wOBA, wOBACON, Season, Team, Player_Season_ID), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev" = "Team_Abbrev")
     ) %>%
-    filter(!is.na(wOBA)) %>%
-    mutate(match_tier = "Tier1_Exact_Team_Season")
+    mutate(match_tier = ifelse(!is.na(wOBA), "Tier1_Exact", NA_character_))
   
-  # Tier 2: TEAM NAME MATCH - For team name vs abbrev discrepancies
-  unmatched_after_tier1 <- expected_with_names %>%
-    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev"))
-  
-  tier2_matches <- unmatched_after_tier1 %>%
+  # Tier 2: Team + Name match (for team name vs abbrev mismatches)
+  tier2_matches <- tier1_matches %>%
+    filter(is.na(match_tier)) %>%
+    select(-wOBA, -wOBACON, -Season, -Team, -Player_Season_ID, -match_tier) %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Initial, Team, Season, wOBA, wOBACON, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
+      select(Last_Name, First_Initial, Team, wOBA, wOBACON, Season, Team_Abbrev, Player_Season_ID), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Team" = "Team")
     ) %>%
-    filter(!is.na(wOBA)) %>%
-    mutate(match_tier = "Tier2_Team_Name_Match")
+    mutate(match_tier = ifelse(!is.na(wOBA), "Tier2_Team", NA_character_))
   
-  # Tier 3: SMART DISAMBIGUATION - Same name, different teams, pick best match
-  unmatched_after_tier2 <- expected_with_names %>%
-    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
-    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team"))
-  
-  tier3_matches <- unmatched_after_tier2 %>%
+  # Tier 3: Full name match (for players who might have switched teams)
+  tier3_matches <- tier2_matches %>%
+    filter(is.na(match_tier)) %>%
+    select(-wOBA, -wOBACON, -Season, -Team_Abbrev, -Player_Season_ID, -match_tier) %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
-      by = c("Last_Name", "First_Initial")
+      select(Last_Name, First_Name, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID), 
+      by = c("Last_Name", "First_Name" = "First_Name")
     ) %>%
-    filter(!is.na(wOBA)) %>%
-    # For players with same name on multiple teams, create disambiguation info
-    group_by(Last_Name, First_Initial) %>%
-    mutate(
-      name_count = n(),
-      # Flag potential disambiguation issues
-      needs_disambiguation = name_count > 1,
-      # Prefer matches where expected team is close to actual team
-      team_match_score = case_when(
-        Expected_NECBL_Abbrev == Team_Abbrev ~ 3,
-        Expected_NECBL_Team == Team ~ 2,
-        TRUE ~ 1
-      )
-    ) %>%
-    # For ambiguous cases, pick the best team match
-    arrange(desc(team_match_score)) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    mutate(match_tier = ifelse(needs_disambiguation, "Tier3_Disambiguated", "Tier3_Name_Only"))
+    mutate(match_tier = ifelse(!is.na(wOBA), "Tier3_FullName", NA_character_))
   
-  # Tier 4: FULL NAME MATCH - When initials might differ
-  unmatched_after_tier3 <- expected_with_names %>%
-    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
-    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team")) %>%
-    anti_join(tier3_matches, by = c("Last_Name", "First_Initial"))
-  
-  tier4_matches <- unmatched_after_tier3 %>%
+  # Tier 4: Name + Initial only (fallback for name variations)
+  tier4_matches <- tier3_matches %>%
+    filter(is.na(match_tier)) %>%
+    select(-wOBA, -wOBACON, -Season, -Team, -Team_Abbrev, -Player_Season_ID, -match_tier) %>%
     left_join(
       necbl_season_data %>% 
-      select(Last_Name, First_Name, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
-      by = c("Last_Name", "First_Name")
-    ) %>%
-    filter(!is.na(wOBA)) %>%
-    group_by(Last_Name, First_Name) %>%
-    slice_head(n = 1) %>%
-    ungroup() %>%
-    mutate(match_tier = "Tier4_Full_Name")
-  
-  # Tier 5: FALLBACK - Last resort for any remaining matches
-  unmatched_after_tier4 <- expected_with_names %>%
-    anti_join(tier1_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")) %>%
-    anti_join(tier2_matches, by = c("Last_Name", "First_Initial", "Expected_NECBL_Team")) %>%
-    anti_join(tier3_matches, by = c("Last_Name", "First_Initial")) %>%
-    anti_join(tier4_matches, by = c("Last_Name", "First_Name"))
-  
-  tier5_matches <- unmatched_after_tier4 %>%
-    left_join(
-      necbl_season_data %>%
       group_by(Last_Name, First_Initial) %>%
+      # For duplicate Last+Initial, prefer current team match
+      arrange(desc(ifelse(Team_Abbrev %in% unique(expected_with_names$Expected_NECBL_Abbrev), 1, 0))) %>%
       slice_head(n = 1) %>%
       ungroup() %>%
-      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID), 
+      select(Last_Name, First_Initial, wOBA, wOBACON, Season, Team, Team_Abbrev, Player_Season_ID), 
       by = c("Last_Name", "First_Initial")
     ) %>%
-    filter(!is.na(wOBA)) %>%
-    mutate(match_tier = "Tier5_Fallback")
+    mutate(match_tier = ifelse(!is.na(wOBA), "Tier4_Initial", NA_character_))
   
-  # Combine all successful matches
-  all_matches <- bind_rows(
-    tier1_matches,
-    tier2_matches, 
-    tier3_matches,
-    tier4_matches,
-    tier5_matches
-  )
+  # Combine all matches with priority order
+  final_matches <- bind_rows(
+    tier1_matches %>% filter(!is.na(match_tier)),
+    tier2_matches %>% filter(!is.na(match_tier)),
+    tier3_matches %>% filter(!is.na(match_tier)),
+    tier4_matches %>% filter(!is.na(match_tier))
+  ) %>%
+    group_by(Last_Name, First_Initial, Expected_NECBL_Abbrev) %>%
+    arrange(match(match_tier, c("Tier1_Exact", "Tier2_Team", "Tier3_FullName", "Tier4_Initial"))) %>%
+    slice_head(n = 1) %>%
+    ungroup()
   
   # Apply matches to ALL expected data - PRESERVE EVERYTHING
   matched_data <- expected_with_names %>%
     left_join(
-      all_matches %>% 
+      final_matches %>% 
       select(Last_Name, First_Initial, Expected_NECBL_Abbrev, wOBA, wOBACON, 
-             Season, Team, Team_Abbrev, Player_Season_ID, NECBL_Player_ID, match_tier), 
+             Season, Team, Team_Abbrev, Player_Season_ID, match_tier), 
       by = c("Last_Name", "First_Initial", "Expected_NECBL_Abbrev")
     ) %>%
     mutate(
@@ -623,30 +516,25 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
       actual_woba_final = wOBA,
       actual_wobacon_final = wOBACON,
       
-      # Enhanced data source tracking with disambiguation info
+      # Enhanced data source tracking
       data_source = case_when(
-        match_tier == "Tier1_Exact_Team_Season" ~ paste0("Expected + Actual (", selected_season, " Exact)"),
-        match_tier == "Tier2_Team_Name_Match" ~ paste0("Expected + Actual (", selected_season, " Team)"),
-        match_tier == "Tier3_Disambiguated" ~ paste0("Expected + Actual (", selected_season, " Disambiguated)"),
-        match_tier == "Tier3_Name_Only" ~ paste0("Expected + Actual (", selected_season, " Name)"),
-        match_tier == "Tier4_Full_Name" ~ paste0("Expected + Actual (", selected_season, " Full Name)"),
-        match_tier == "Tier5_Fallback" ~ paste0("Expected + Actual (", selected_season, " Fallback)"),
+        match_tier == "Tier1_Exact" ~ paste0("Expected + Actual (", selected_season, " Exact)"),
+        match_tier == "Tier2_Team" ~ paste0("Expected + Actual (", selected_season, " Team)"),
+        match_tier == "Tier3_FullName" ~ paste0("Expected + Actual (", selected_season, " Name)"),
+        match_tier == "Tier4_Initial" ~ paste0("Expected + Actual (", selected_season, " Initial)"),
         TRUE ~ "Expected Only"
       ),
       
       # Team and season info
       actual_team_abbrev = Team_Abbrev,
-      actual_season = Season,
-      
-      # Add disambiguation tracking
-      player_disambiguation_id = NECBL_Player_ID
+      actual_season = Season
     ) %>%
     select(-Last_Name, -First_Initial, -First_Name_Full, -First_Name_Parts, 
            -First_Name, -Middle_Initial, -Expected_NECBL_Team, -Expected_NECBL_Abbrev, 
            -Expected_Player_ID, -wOBA, -wOBACON, -Season, -Team, -Team_Abbrev, 
-           -Player_Season_ID, -NECBL_Player_ID, -match_tier)
+           -Player_Season_ID, -match_tier)
   
-  # Enhanced summary with disambiguation tracking
+  # Summary with match quality breakdown
   total_records <- nrow(matched_data)
   actual_overlay <- sum(!is.na(matched_data$actual_woba_final))
   
@@ -654,19 +542,7 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
     filter(!is.na(actual_woba_final)) %>%
     count(data_source, name = "matches")
   
-  # Check for disambiguation issues
-  disambiguation_check <- all_matches %>%
-    filter(!is.na(wOBA)) %>%
-    group_by(Last_Name, First_Initial) %>%
-    summarise(
-      player_count = n(),
-      teams = paste(unique(Team_Abbrev), collapse = ", "),
-      disambiguation_needed = n() > 1,
-      .groups = "drop"
-    ) %>%
-    filter(disambiguation_needed)
-  
-  cat("=== ENHANCED MATCHING SUMMARY FOR", selected_season, "===\n")
+  cat("=== MATCHING SUMMARY FOR", selected_season, "===\n")
   cat("- TOTAL EXPECTED RECORDS PRESERVED:", total_records, "(100%)\n")
   cat("- Records with Actual overlay:", actual_overlay, "\n")
   cat("- Overlay rate:", round(actual_overlay / total_records * 100, 1), "%\n")
@@ -675,14 +551,6 @@ match_necbl_data <- function(expected_data, necbl_data, selected_season = "2025"
     cat("- Match quality breakdown:\n")
     for (i in 1:nrow(match_summary)) {
       cat("  *", match_summary$data_source[i], ":", match_summary$matches[i], "\n")
-    }
-  }
-  
-  if (nrow(disambiguation_check) > 0) {
-    cat("- Players requiring disambiguation:\n")
-    for (i in 1:nrow(disambiguation_check)) {
-      cat("  *", disambiguation_check$Last_Name[i], disambiguation_check$First_Initial[i], 
-          "- Teams:", disambiguation_check$teams[i], "\n")
     }
   }
   
