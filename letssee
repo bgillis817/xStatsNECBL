@@ -273,6 +273,10 @@ get_team_info_from_model_code <- function(model_team_code) {
 # SECTION 4: ENHANCED SCRAPER WITH COMPOSITE KEY GENERATION & FIXES
 # ===================================================================
 
+# ===================================================================
+# SECTION 4: ENHANCED SCRAPER WITH COMPOSITE KEY GENERATION & FIXES
+# ===================================================================
+
 # Enhanced scraper with composite key generation for exact matching
 get_necbl_woba_by_season <- function(season = "2025") {
   cat("=== SCRAPING NECBL", season, "SEASON WITH COMPOSITE KEYS ===\n")
@@ -286,6 +290,8 @@ get_necbl_woba_by_season <- function(season = "2025") {
   seasonid <- season_info$seasonid
   all_woba <- data.frame()
   
+  cat("Using UNIVERSAL URL format with leagueid=204 for all teams\n")
+  
   for (team_code in names(necbl_team_mapping_enhanced)) {
     team_info <- necbl_team_mapping_enhanced[[team_code]]
     team_name <- team_info$name
@@ -297,14 +303,9 @@ get_necbl_woba_by_season <- function(season = "2025") {
     # Skip other duplicate entries
     if (team_code %in% c("NWL_WB", "WIN_MUS", "NEC_EAS", "NEC_WES")) next
     
-    # Construct URL based on team (Bristol Blues has special URL format)
-    if (team_name == "Bristol Blues") {
-      url <- paste0("http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=", 
-                   seasonid, "&teamid=", team_id)
-    } else {
-      url <- paste0("http://necbl.wttbaseball.pointstreak.com/team_stats.html?teamid=", 
-                   team_id, "&seasonid=", seasonid)
-    }
+    # UNIVERSAL FORMAT: ALL seasons and ALL teams use leagueid=204
+    url <- paste0("http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=", 
+                 seasonid, "&teamid=", team_id)
     
     cat("Scraping", team_name, "(", team_abbrev, ") for", season, "...\n")
     
@@ -498,6 +499,7 @@ get_necbl_woba_by_season <- function(season = "2025") {
   
   return(all_woba)
 }
+
 # ===================================================================
 # SECTION 5: SIMPLIFIED MATCHING FUNCTION WITH COMPOSITE KEYS
 # ===================================================================
