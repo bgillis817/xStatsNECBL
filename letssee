@@ -240,9 +240,9 @@ necbl_team_mapping_enhanced <- list(
 necbl_urls_by_season <- list(
   "2025" = list(seasonid = "34029"),
   "2024" = list(seasonid = "33860"),
-  "2023" = list(seasonid = "33603"),
-  "2022" = list(seasonid = "33347"),
-  "2021" = list(seasonid = "33089")
+  "2023" = list(seasonid = "33589"),
+  "2022" = list(seasonid = "33205"),
+  "2021" = list(seasonid = "32746")
 )
 
 # Helper function to create composite keys
