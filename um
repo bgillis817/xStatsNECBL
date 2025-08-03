@@ -504,20 +504,20 @@ get_necbl_woba_by_season <- function(season = "2025") {
 # SECTION 5: SIMPLIFIED MATCHING FUNCTION WITH COMPOSITE KEYS
 # ===================================================================
 
-# MASSIVELY SIMPLIFIED: No more 4-tier matching - just exact composite key joins!
+# FIXED: MASSIVELY SIMPLIFIED with proper season separation - just exact composite key joins!
 match_necbl_data_composite <- function(expected_data, necbl_data, selected_season = "2025") {
   cat("=== MATCHING WITH COMPOSITE KEYS (EXACT JOINS ONLY) ===\n")
   cat("Expected records (PRIMARY):", nrow(expected_data), "\n")
   cat("NECBL records (OVERLAY):", nrow(necbl_data), "\n")
   cat("Selected season:", selected_season, "\n")
   
-  # Filter NECBL data to selected season ONLY
+  # CRITICAL FIX: Filter NECBL data to selected season ONLY
   necbl_season_data <- necbl_data %>%
     filter(Season == selected_season)
   
   cat("NECBL records for", selected_season, ":", nrow(necbl_season_data), "\n")
   
-  # Generate composite keys for expected data
+  # Generate composite keys for expected data FOR THE SELECTED SEASON ONLY
   expected_with_keys <- expected_data %>%
     mutate(
       # Parse expected data names: "Last Name, First Name" format
@@ -531,14 +531,14 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
         if (!is.null(team_info)) team_info$abbrev else "UNK"
       }),
       
-      # Generate composite key for expected data
+      # CRITICAL: Generate composite key for SELECTED SEASON ONLY
       Expected_Composite_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, selected_season)
     )
   
-  cat("Generated", nrow(expected_with_keys), "composite keys for expected data\n")
+  cat("Generated", nrow(expected_with_keys), "composite keys for expected data (", selected_season, "season)\n")
   
   # Show sample expected keys for verification
-  cat("Sample expected composite keys:\n")
+  cat("Sample expected composite keys for", selected_season, ":\n")
   sample_keys <- expected_with_keys %>% 
     distinct(Batter, Expected_Composite_Key, BatterTeam) %>% 
     head(3)
@@ -558,33 +558,45 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
            ))
   }
   
-  # SIMPLE EXACT JOIN ON COMPOSITE KEYS - No complex tiers!
+  # FIXED: SIMPLE EXACT JOIN ON COMPOSITE KEYS - SEASON-SPECIFIC ONLY
   joined_data <- expected_with_keys %>%
     left_join(
       necbl_season_data %>% 
-      select(Player_Team_Season_Key, Player, wOBA, wOBACON, Team, Team_Abbrev, PA, Batted_Balls), 
+      select(Player_Team_Season_Key, Player, wOBA, wOBACON, Team, Team_Abbrev, PA, Batted_Balls, Season), 
       by = c("Expected_Composite_Key" = "Player_Team_Season_Key")
     )
   
-  # Check what columns we actually have after the join
-  cat("Columns after join:", paste(names(joined_data), collapse = ", "), "\n")
+  # VERIFICATION: Ensure we only have data from the selected season
+  if ("Season" %in% names(joined_data)) {
+    non_season_matches <- joined_data %>%
+      filter(!is.na(Season) & Season != selected_season)
+    
+    if (nrow(non_season_matches) > 0) {
+      cat("⚠️  WARNING: Found", nrow(non_season_matches), "matches from wrong seasons - removing them\n")
+      print(non_season_matches %>% select(Batter, Season, Expected_Composite_Key))
+      
+      # Remove wrong season matches
+      joined_data <- joined_data %>%
+        filter(is.na(Season) | Season == selected_season)
+    }
+  }
   
   matched_data <- joined_data %>%
     mutate(
-      # Overlay actual data where available
+      # Overlay actual data where available (from selected season only)
       actual_woba_final = wOBA,
       actual_wobacon_final = wOBACON,
       necbl_composite_key = Expected_Composite_Key,
       
-      # Simple match quality
+      # Simple match quality with season verification
       match_quality = case_when(
-        !is.na(wOBA) ~ paste0("Exact Match (", selected_season, ")"),
+        !is.na(wOBA) & (is.na(Season) | Season == selected_season) ~ paste0("Exact Match (", selected_season, ")"),
         TRUE ~ "No Match"
       ),
       
-      # Data source
+      # Data source with season verification
       data_source = case_when(
-        !is.na(wOBA) ~ paste0("Expected + Actual (", selected_season, ")"),
+        !is.na(wOBA) & (is.na(Season) | Season == selected_season) ~ paste0("Expected + Actual (", selected_season, ")"),
         TRUE ~ "Expected Only"
       ),
       
@@ -593,12 +605,31 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       necbl_team = if("Team" %in% names(.)) Team else NA_character_,
       necbl_team_abbrev = if("Team_Abbrev" %in% names(.)) Team_Abbrev else NA_character_,
       necbl_pa = if("PA" %in% names(.)) PA else NA_integer_,
-      necbl_batted_balls = if("Batted_Balls" %in% names(.)) Batted_Balls else NA_integer_
+      necbl_batted_balls = if("Batted_Balls" %in% names(.)) Batted_Balls else NA_integer_,
+      necbl_season = if("Season" %in% names(.)) Season else NA_character_
     ) %>%
     # Clean up temporary columns - ONLY REMOVE COLUMNS THAT WE CREATED
     select(-Last_Name, -First_Initial, -First_Name_Full, -Expected_Composite_Key) %>%
     # Remove the joined columns that we've copied to new names
-    select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls")))
+    select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls", "Season")))
+  
+  # FINAL VERIFICATION: Ensure season separation
+  if ("necbl_season" %in% names(matched_data)) {
+    season_check <- matched_data %>%
+      filter(!is.na(actual_woba_final)) %>%
+      count(necbl_season, name = "matches")
+    
+    cat("\n=== SEASON SEPARATION VERIFICATION ===\n")
+    cat("Matches by season:\n")
+    print(season_check)
+    
+    wrong_season_matches <- sum(season_check$matches[season_check$necbl_season != selected_season], na.rm = TRUE)
+    if (wrong_season_matches > 0) {
+      cat("❌ ERROR: Found", wrong_season_matches, "matches from wrong seasons!\n")
+    } else {
+      cat("✅ All matches are from", selected_season, "season only\n")
+    }
+  }
   
   # MATCHING SUMMARY
   total_records <- nrow(matched_data)
@@ -607,7 +638,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   
   cat("\n=== COMPOSITE KEY MATCHING SUMMARY ===\n")
   cat("✅ TOTAL EXPECTED RECORDS PRESERVED:", total_records, "(100%)\n")
-  cat("🎯 EXACT MATCHES FOUND:", exact_matches, "\n")
+  cat("🎯 EXACT MATCHES FOUND (", selected_season, " only):", exact_matches, "\n")
   cat("📊 MATCH RATE:", match_rate, "%\n")
   
   # Show match quality breakdown
@@ -625,11 +656,11 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   successful_matches <- matched_data %>%
     filter(!is.na(actual_woba_final)) %>%
     select(Batter, BatterTeam, necbl_player_name, necbl_team_abbrev, 
-           actual_woba_final, necbl_composite_key) %>%
+           actual_woba_final, necbl_composite_key, necbl_season) %>%
     head(3)
   
   if (nrow(successful_matches) > 0) {
-    cat("\n🔍 SAMPLE SUCCESSFUL MATCHES:\n")
+    cat("\n🔍 SAMPLE SUCCESSFUL MATCHES (", selected_season, " season only):\n")
     print(successful_matches)
   }
   
@@ -664,6 +695,7 @@ analyze_match_quality <- function(matched_data) {
   
   return(team_analysis)
 }
+
 # ===================================================================
 # SECTION 6: LOAD ALL SEASONS WITH COMPOSITE KEY TRACKING
 # ===================================================================
@@ -1152,7 +1184,7 @@ server <- function(input, output, session) {
     }
   })
   
-  # Helper function for filtered data with composite key awareness
+  # Helper function for filtered data with composite key awareness - FIXED FOR SEASON SEPARATION
   get_filtered_data <- function() {
     req(values$enhanced_data)
     
@@ -1162,16 +1194,25 @@ server <- function(input, output, session) {
       return(data.frame())
     }
     
-    # Apply season filter for composite key matching
+    # CRITICAL FIX: Apply season filter for composite key matching
     if (!is.null(input$season_scope) && input$season_scope == "selected" && 
         !is.null(input$primary_season)) {
       
-      # For composite key system: show players with exact matches from selected season
+      # For composite key system: show players with exact matches from selected season ONLY
       current_data <- current_data %>%
         filter(
+          # Either no NECBL match (expected only)
           is.na(actual_woba_final) | 
-          grepl(paste0("_", input$primary_season, "$"), necbl_composite_key, fixed = FALSE)
+          # OR exact match from the selected season
+          (grepl(paste0("_", input$primary_season, "$"), necbl_composite_key, fixed = FALSE) &
+           !is.na(actual_woba_final))
         )
+      
+      # ADDITIONAL VERIFICATION: Remove any cross-season contamination
+      if ("necbl_season" %in% names(current_data)) {
+        current_data <- current_data %>%
+          filter(is.na(necbl_season) | necbl_season == input$primary_season)
+      }
     }
     
     # Apply PA threshold
