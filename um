@@ -697,8 +697,326 @@ analyze_match_quality <- function(matched_data) {
 }
 
 # ===================================================================
-# SECTION 6: LOAD ALL SEASONS WITH COMPOSITE KEY TRACKING
+# SECTION 6: SEASON-SPECIFIC DATA MANAGEMENT WITH COMPOSITE KEYS
 # ===================================================================
+
+# Enhanced initialization that creates season-specific datasets
+initialize_season_specific_data <- function() {
+  cat("=== INITIALIZING SEASON-SPECIFIC DATA WITH COMPOSITE KEYS ===\n")
+  
+  # Get base data
+  if (exists("pipeline_results") && is.data.frame(pipeline_results) && nrow(pipeline_results) > 0) {
+    cat("✅ Using existing pipeline_results data\n")
+    base_data <- pipeline_results
+  } else if (exists("combined_df") && is.data.frame(combined_df) && nrow(combined_df) > 0) {
+    cat("✅ Using existing combined_df data\n")
+    base_data <- combined_df
+  } else if (exists("raw_data") && is.data.frame(raw_data) && nrow(raw_data) > 0) {
+    cat("✅ Using raw_data\n")
+    base_data <- raw_data
+  } else {
+    cat("❌ No existing data found\n")
+    return(NULL)
+  }
+  
+  # Ensure proper xwOBA/xwOBACON calculation
+  if (!"predicted_xwobacon_final" %in% names(base_data)) {
+    cat("🔄 Calculating xwOBA/xwOBACON...\n")
+    base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
+  }
+  
+  # CRITICAL: Extract season from Date column
+  if ("Date" %in% names(base_data)) {
+    base_data <- base_data %>%
+      mutate(
+        Season_Year = as.numeric(format(as.Date(Date), "%Y")),
+        Season = as.character(Season_Year)
+      )
+    
+    available_seasons <- sort(unique(base_data$Season))
+    cat("✅ Seasons found in data:", paste(available_seasons, collapse = ", "), "\n")
+  } else {
+    cat("❌ No Date column found - cannot separate by season\n")
+    return(NULL)
+  }
+  
+  # Create season-specific datasets
+  season_datasets <- list()
+  
+  for (season in available_seasons) {
+    cat("\n📅 Processing", season, "season...\n")
+    
+    # Filter to specific season
+    season_data <- base_data %>%
+      filter(Season == season)
+    
+    cat("   Records for", season, ":", nrow(season_data), "\n")
+    
+    # Calculate season-specific player metrics
+    season_player_metrics <- season_data %>%
+      group_by(Batter, BatterTeam) %>%
+      summarise(
+        Season = first(Season),
+        PA_Count = n(),
+        
+        # Season-specific expected metrics
+        xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
+        xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
+        
+        # Initialize actual metrics (will be filled by NECBL matching)
+        wOBA = NA_real_,
+        wOBACON = NA_real_,
+        
+        # Generate season-specific composite key
+        Last_Name = toupper(trimws(sub(",.*", "", first(Batter)))),
+        First_Initial = toupper(substr(trimws(sub(".*,\\s*", "", first(Batter))), 1, 1)),
+        Team_Abbrev = first(sapply(BatterTeam, function(x) {
+          team_info <- necbl_team_mapping_enhanced[[x]]
+          if (!is.null(team_info)) team_info$abbrev else "UNK"
+        })),
+        
+        .groups = "drop"
+      ) %>%
+      mutate(
+        # Create season-specific composite key
+        Composite_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, Season),
+        
+        # Initialize NECBL overlay columns
+        actual_woba_final = NA_real_,
+        actual_wobacon_final = NA_real_,
+        data_source = "Expected Only",
+        necbl_composite_key = NA_character_,
+        match_quality = "No NECBL Data",
+        necbl_player_name = NA_character_,
+        necbl_team = NA_character_,
+        necbl_team_abbrev = NA_character_,
+        necbl_pa = NA_integer_,
+        necbl_batted_balls = NA_integer_,
+        necbl_season = NA_character_
+      ) %>%
+      select(-Last_Name, -First_Initial, -Team_Abbrev)
+    
+    season_datasets[[season]] <- season_player_metrics
+    
+    cat("   Players for", season, ":", nrow(season_player_metrics), "\n")
+    cat("   Sample composite keys:\n")
+    sample_keys <- head(season_player_metrics$Composite_Key, 3)
+    cat("     ", paste(sample_keys, collapse = ", "), "\n")
+  }
+  
+  cat("\n=== SEASON-SPECIFIC DATASETS CREATED ===\n")
+  cat("📊 Total seasons:", length(season_datasets), "\n")
+  for (season in names(season_datasets)) {
+    cat("   ", season, ":", nrow(season_datasets[[season]]), "players\n")
+  }
+  
+  return(season_datasets)
+}
+
+# Enhanced matching that works with season-specific datasets
+match_season_specific_data <- function(season_datasets, necbl_data_all, selected_season = "2025") {
+  cat("=== SEASON-SPECIFIC MATCHING FOR", selected_season, "===\n")
+  
+  # Get the season-specific expected dataset
+  if (!selected_season %in% names(season_datasets)) {
+    cat("❌ Season", selected_season, "not found in expected data\n")
+    return(data.frame())
+  }
+  
+  expected_season_data <- season_datasets[[selected_season]]
+  cat("Expected records for", selected_season, ":", nrow(expected_season_data), "\n")
+  
+  # Get NECBL data for selected season
+  necbl_season_data <- necbl_data_all %>%
+    filter(Season == selected_season)
+  cat("NECBL records for", selected_season, ":", nrow(necbl_season_data), "\n")
+  
+  if (nrow(necbl_season_data) == 0) {
+    cat("No NECBL data for", selected_season, "- returning expected-only\n")
+    return(expected_season_data)
+  }
+  
+  # EXACT MATCHING: Join on composite keys
+  matched_data <- expected_season_data %>%
+    left_join(
+      necbl_season_data %>% 
+      select(Player_Team_Season_Key, Player, wOBA, wOBACON, Team, Team_Abbrev, PA, Batted_Balls, Season), 
+      by = c("Composite_Key" = "Player_Team_Season_Key")
+    ) %>%
+    mutate(
+      # Overlay actual data where available (season-specific only)
+      actual_woba_final = wOBA,
+      actual_wobacon_final = wOBACON,
+      necbl_composite_key = Composite_Key,
+      
+      # Update match quality
+      match_quality = case_when(
+        !is.na(wOBA) ~ paste0("Exact Match (", selected_season, ")"),
+        TRUE ~ "No Match"
+      ),
+      
+      # Update data source
+      data_source = case_when(
+        !is.na(wOBA) ~ paste0("Expected + Actual (", selected_season, ")"),
+        TRUE ~ "Expected Only"
+      ),
+      
+      # NECBL player info
+      necbl_player_name = if("Player" %in% names(.)) Player else NA_character_,
+      necbl_team = if("Team" %in% names(.)) Team else NA_character_,
+      necbl_team_abbrev = if("Team_Abbrev" %in% names(.)) Team_Abbrev else NA_character_,
+      necbl_pa = if("PA" %in% names(.)) PA else NA_integer_,
+      necbl_batted_balls = if("Batted_Balls" %in% names(.)) Batted_Balls else NA_integer_,
+      necbl_season = if("Season" %in% names(.)) Season else NA_character_
+    ) %>%
+    # Remove joined columns
+    select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls", "Season")))
+  
+  # Verification: Ensure no cross-season contamination
+  if ("necbl_season" %in% names(matched_data)) {
+    wrong_season_matches <- matched_data %>%
+      filter(!is.na(necbl_season) & necbl_season != selected_season)
+    
+    if (nrow(wrong_season_matches) > 0) {
+      cat("⚠️  WARNING: Removing", nrow(wrong_season_matches), "matches from wrong seasons\n")
+      matched_data <- matched_data %>%
+        filter(is.na(necbl_season) | necbl_season == selected_season)
+    }
+  }
+  
+  # Summary
+  total_records <- nrow(matched_data)
+  exact_matches <- sum(!is.na(matched_data$actual_woba_final))
+  match_rate <- round(exact_matches / total_records * 100, 1)
+  
+  cat("\n=== SEASON-SPECIFIC MATCHING SUMMARY ===\n")
+  cat("✅ EXPECTED RECORDS (", selected_season, " only):", total_records, "\n")
+  cat("🎯 EXACT MATCHES FOUND:", exact_matches, "\n")
+  cat("📊 MATCH RATE:", match_rate, "%\n")
+  
+  # Show sample matches
+  if (exact_matches > 0) {
+    cat("\n🔍 SAMPLE MATCHES:\n")
+    samples <- matched_data %>%
+      filter(!is.na(actual_woba_final)) %>%
+      select(Batter, Season, xwOBA, actual_woba_final, Composite_Key) %>%
+      head(3)
+    print(samples)
+  }
+  
+  return(matched_data)
+}
+
+# Function to create cumulative multi-season view with flexible season combinations
+create_cumulative_view <- function(season_datasets, necbl_data_all, selected_seasons = NULL) {
+  # If no seasons specified, use all available seasons
+  if (is.null(selected_seasons)) {
+    selected_seasons <- names(season_datasets)
+  }
+  
+  cat("=== CREATING CUMULATIVE VIEW FOR SEASONS:", paste(selected_seasons, collapse = ", "), "===\n")
+  
+  cumulative_data <- data.frame()
+  
+  for (season in selected_seasons) {
+    if (season %in% names(season_datasets)) {
+      # Get matched data for this season
+      season_matched <- match_season_specific_data(season_datasets, necbl_data_all, season)
+      
+      if (nrow(season_matched) > 0) {
+        cumulative_data <- rbind(cumulative_data, season_matched)
+        cat("Added", nrow(season_matched), "records from", season, "\n")
+      }
+    } else {
+      cat("⚠️  Season", season, "not found in expected data\n")
+    }
+  }
+  
+  if (nrow(cumulative_data) == 0) {
+    cat("❌ No data found for selected seasons\n")
+    return(data.frame())
+  }
+  
+  cat("✅ Cumulative dataset created:", nrow(cumulative_data), "total records\n")
+  
+  # Show breakdown by season
+  season_breakdown <- cumulative_data %>%
+    count(Season, name = "Records") %>%
+    arrange(Season)
+  
+  cat("📊 Records by season:\n")
+  print(season_breakdown)
+  
+  # Add cumulative identifier for multi-season analysis
+  cumulative_data <- cumulative_data %>%
+    mutate(
+      Is_Cumulative = TRUE,
+      Cumulative_Seasons = paste(selected_seasons, collapse = "+"),
+      # Update data source to reflect cumulative nature
+      data_source = case_when(
+        !is.na(actual_woba_final) ~ paste0("Expected + Actual (", Season, ")"),
+        TRUE ~ "Expected Only"
+      ),
+      # Update match quality to show season context
+      match_quality = case_when(
+        !is.na(actual_woba_final) ~ paste0("Exact Match (", Season, ")"),
+        TRUE ~ "No Match"
+      )
+    )
+  
+  return(cumulative_data)
+}
+
+# Function to create player career views across multiple seasons
+create_career_view <- function(season_datasets, necbl_data_all, player_name = NULL) {
+  if (is.null(player_name)) {
+    cat("❌ Player name required for career view\n")
+    return(data.frame())
+  }
+  
+  cat("=== CREATING CAREER VIEW FOR:", player_name, "===\n")
+  
+  career_data <- data.frame()
+  seasons_found <- c()
+  
+  # Look for player across all seasons
+  for (season in names(season_datasets)) {
+    season_data <- season_datasets[[season]]
+    player_season_data <- season_data %>%
+      filter(Batter == player_name)
+    
+    if (nrow(player_season_data) > 0) {
+      # Get matched data for this player/season
+      season_matched <- match_season_specific_data(season_datasets, necbl_data_all, season)
+      player_matched <- season_matched %>%
+        filter(Batter == player_name)
+      
+      if (nrow(player_matched) > 0) {
+        career_data <- rbind(career_data, player_matched)
+        seasons_found <- c(seasons_found, season)
+        cat("Found", player_name, "in", season, "season\n")
+      }
+    }
+  }
+  
+  if (nrow(career_data) == 0) {
+    cat("❌ Player", player_name, "not found in any season\n")
+    return(data.frame())
+  }
+  
+  cat("✅ Career data created for", player_name, "across", length(seasons_found), "seasons:", paste(seasons_found, collapse = ", "), "\n")
+  
+  # Add career identifiers
+  career_data <- career_data %>%
+    mutate(
+      Is_Career_View = TRUE,
+      Career_Seasons = paste(seasons_found, collapse = "+"),
+      Career_Player = player_name
+    ) %>%
+    arrange(Season)
+  
+  return(career_data)
+}
 
 # Load all seasons with progress tracking and composite key verification
 get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
@@ -742,157 +1060,43 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
     Sys.sleep(2)
   }
   
-  cat("\n=== FINAL COMPOSITE KEY VERIFICATION ===\n")
-  
-  if (nrow(all_seasons_data) > 0) {
-    # Check for any cross-season duplicates (shouldn't happen with season in key)
-    all_keys <- all_seasons_data$Player_Team_Season_Key
-    duplicate_keys <- all_seasons_data %>%
-      group_by(Player_Team_Season_Key) %>%
-      filter(n() > 1)
-    
-    if (nrow(duplicate_keys) > 0) {
-      cat("❌ CRITICAL ERROR:", nrow(duplicate_keys), "duplicate composite keys across all seasons!\n")
-      print(duplicate_keys %>% select(Player, Player_Team_Season_Key, Season, Team))
-    } else {
-      cat("✅ ALL", length(unique(all_keys)), "COMPOSITE KEYS ARE GLOBALLY UNIQUE!\n")
-    }
-    
-    # Summary statistics
-    cat("\n📈 COMPOSITE KEY SUMMARY:\n")
-    season_summary <- all_seasons_data %>%
-      group_by(Season) %>%
-      summarise(
-        Players = n(),
-        Unique_Keys = n_distinct(Player_Team_Season_Key),
-        Teams = n_distinct(Team_Abbrev),
-        Avg_wOBA = round(mean(wOBA, na.rm = TRUE), 3),
-        Avg_wOBACON = round(mean(wOBACON, na.rm = TRUE), 3),
-        .groups = "drop"
-      ) %>%
-      arrange(Season)
-    
-    print(season_summary)
-    
-    # Show sample composite keys from each season
-    cat("\n🔍 SAMPLE COMPOSITE KEYS BY SEASON:\n")
-    sample_keys <- all_seasons_data %>%
-      group_by(Season) %>%
-      slice_head(n = 2) %>%
-      select(Season, Player, Player_Team_Season_Key, Team_Abbrev) %>%
-      ungroup()
-    
-    print(sample_keys)
-    
-  } else {
-    cat("❌ NO DATA LOADED FROM ANY SEASON\n")
-  }
-  
   cat("\n=== TOTAL NECBL DATA LOADED ===\n")
   cat("📊 Total records across all seasons:", nrow(all_seasons_data), "\n")
   cat("🔑 Total unique composite keys:", length(unique(all_seasons_data$Player_Team_Season_Key)), "\n")
   cat("📅 Seasons loaded:", paste(unique(all_seasons_data$Season), collapse = ", "), "\n")
   cat("🏟️  Teams represented:", length(unique(all_seasons_data$Team_Abbrev)), "\n")
+  cat("✅ UNIVERSAL leagueid=204 URL format used for ALL seasons\n")
   
   return(all_seasons_data)
 }
 
-# Enhanced initialization with composite key support - FIXED VERSION
-initialize_enhanced_data_composite <- function() {
-  cat("=== INITIALIZING ENHANCED DATA WITH COMPOSITE KEY SUPPORT ===\n")
+# Helper function to analyze match quality
+analyze_match_quality <- function(matched_data) {
+  cat("=== DETAILED MATCH QUALITY ANALYSIS ===\n")
   
-  # Try to use your existing data - check multiple possible names
-  if (exists("pipeline_results") && is.data.frame(pipeline_results) && nrow(pipeline_results) > 0) {
-    cat("✅ Using existing pipeline_results data\n")
-    base_data <- pipeline_results
-    
-    # Ensure proper xwOBA/xwOBACON separation
-    if (!"predicted_xwobacon_final" %in% names(base_data)) {
-      cat("🔄 Recalculating xwOBA/xwOBACON separation...\n")
-      base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
-    }
-    
-  } else if (exists("combined_df") && is.data.frame(combined_df) && nrow(combined_df) > 0) {
-    cat("✅ Using existing combined_df data\n")
-    base_data <- combined_df
-    
-    # Ensure proper xwOBA/xwOBACON separation
-    if (!"predicted_xwobacon_final" %in% names(base_data)) {
-      cat("🔄 Recalculating xwOBA/xwOBACON separation...\n")
-      base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
-    }
-    
-  } else if (exists("raw_data") && is.data.frame(raw_data) && nrow(raw_data) > 0) {
-    cat("✅ Using raw_data and applying expected calculations\n")
-    base_data <- calculate_expected_xwoba_and_full(raw_data, if(exists("expected")) expected else NULL)
-    
-  } else {
-    cat("❌ No existing data found - create sample data first\n")
-    return(NULL)
-  }
+  # Overall statistics
+  total <- nrow(matched_data)
+  matched <- sum(!is.na(matched_data$actual_woba_final))
   
-  # Verify required columns exist
-  required_cols <- c("Batter", "BatterTeam")
-  missing_cols <- required_cols[!required_cols %in% names(base_data)]
+  cat("Total Expected Players:", total, "\n")
+  cat("Successfully Matched:", matched, "\n")
+  cat("Match Rate:", round(matched/total * 100, 1), "%\n\n")
   
-  if (length(missing_cols) > 0) {
-    cat("❌ MISSING REQUIRED COLUMNS:", paste(missing_cols, collapse = ", "), "\n")
-    return(NULL)
-  }
-  
-  # Check BatterTeam values against mapping
-  unique_teams <- unique(base_data$BatterTeam)
-  mapped_teams <- names(necbl_team_mapping_enhanced)
-  unmapped_teams <- unique_teams[!unique_teams %in% mapped_teams]
-  
-  cat("🏟️  TEAM CODE VERIFICATION:\n")
-  cat("   Expected teams found:", paste(intersect(unique_teams, mapped_teams), collapse = ", "), "\n")
-  
-  if (length(unmapped_teams) > 0) {
-    cat("⚠️  UNMAPPED TEAM CODES:", paste(unmapped_teams, collapse = ", "), "\n")
-    cat("   These will get 'UNK' abbreviation in composite keys\n")
-  }
-  
-  # Ensure all required columns exist with proper defaults
-  final_data <- base_data %>%
-    mutate(
-      predicted_xwoba_final = if("predicted_xwoba_final" %in% names(.)) predicted_xwoba_final else 0.350,
-      predicted_xwobacon_final = if("predicted_xwobacon_final" %in% names(.)) predicted_xwobacon_final else 0.400,
-      
-      # Initialize actual overlay columns for composite key matching
-      actual_woba_final = NA_real_,
-      actual_wobacon_final = NA_real_,
-      data_source = "Expected Only",
-      necbl_composite_key = NA_character_,
-      match_quality = "No NECBL Data",
-      necbl_player_name = NA_character_,
-      necbl_team = NA_character_,
-      necbl_team_abbrev = NA_character_,
-      necbl_pa = NA_integer_,
-      necbl_batted_balls = NA_integer_
-    )
-  
-  # Generate sample composite keys for verification
-  sample_expected_keys <- final_data %>%
-    mutate(
-      Last_Name = toupper(trimws(sub(",.*", "", Batter))),
-      First_Initial = toupper(substr(trimws(sub(".*,\\s*", "", Batter)), 1, 1)),
-      Team_Abbrev = sapply(BatterTeam, function(x) {
-        team_info <- necbl_team_mapping_enhanced[[x]]
-        if (!is.null(team_info)) team_info$abbrev else "UNK"
-      }),
-      Sample_Composite_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, "2025")
+  # By team analysis
+  team_analysis <- matched_data %>%
+    group_by(BatterTeam) %>%
+    summarise(
+      Total_Players = n(),
+      Matched_Players = sum(!is.na(actual_woba_final)),
+      Match_Rate = round(Matched_Players / Total_Players * 100, 1),
+      .groups = "drop"
     ) %>%
-    distinct(Batter, BatterTeam, Sample_Composite_Key) %>%
-    head(5)
+    arrange(desc(Match_Rate))
   
-  cat("\n🔍 SAMPLE EXPECTED COMPOSITE KEYS (for 2025):\n")
-  print(sample_expected_keys)
+  cat("MATCH RATE BY TEAM:\n")
+  print(team_analysis)
   
-  cat("\n✅ Enhanced data initialized with", nrow(final_data), "total records\n")
-  cat("🔑 Ready for composite key matching!\n")
-  
-  return(final_data)
+  return(team_analysis)
 }
 # ===================================================================
 # SECTION 7: ENHANCED SHINY UI WITH COMPOSITE KEY FEATURES
@@ -1159,32 +1363,36 @@ ui <- dashboardPage(
 # ===================================================================
 # SECTION 8 PART 1: ENHANCED SHINY SERVER WITH COMPOSITE KEY LOGIC
 # ===================================================================
-
 server <- function(input, output, session) {
   
-  # Enhanced reactive values with composite key support
+  # Enhanced reactive values with season-specific support
   values <- reactiveValues(
-    expected_data = NULL,
+    season_datasets = NULL,           # NEW: Season-specific datasets
     necbl_data_all = NULL,
     necbl_data_current = NULL,
-    enhanced_data = NULL,
+    enhanced_data = NULL,             # Current season's matched data
     available_seasons = character(0),
     last_update = NULL,
     match_quality_stats = NULL
   )
   
-  # Initialize with composite key support
+  # Initialize with season-specific support
   observe({
-    if (is.null(values$expected_data)) {
-      values$expected_data <- initialize_enhanced_data_composite()
-      if (!is.null(values$expected_data)) {
-        values$enhanced_data <- values$expected_data
-        cat("✅ Initialized with", nrow(values$enhanced_data), "expected records\n")
+    if (is.null(values$season_datasets)) {
+      values$season_datasets <- initialize_season_specific_data()
+      if (!is.null(values$season_datasets)) {
+        # Set initial enhanced_data to 2025 season (or first available)
+        available_seasons <- names(values$season_datasets)
+        initial_season <- if("2025" %in% available_seasons) "2025" else available_seasons[1]
+        values$enhanced_data <- values$season_datasets[[initial_season]]
+        values$available_seasons <- available_seasons
+        cat("✅ Initialized season-specific datasets for seasons:", paste(available_seasons, collapse = ", "), "\n")
+        cat("✅ Set initial season to:", initial_season, "\n")
       }
     }
   })
   
-  # Helper function for filtered data with composite key awareness - FIXED FOR SEASON SEPARATION
+  # Helper function for filtered data with season-specific awareness
   get_filtered_data <- function() {
     req(values$enhanced_data)
     
@@ -1194,34 +1402,26 @@ server <- function(input, output, session) {
       return(data.frame())
     }
     
-    # CRITICAL FIX: Apply season filter for composite key matching
+    # Apply season filter for season-specific matching
     if (!is.null(input$season_scope) && input$season_scope == "selected" && 
         !is.null(input$primary_season)) {
       
-      # For composite key system: show players with exact matches from selected season ONLY
+      # For season-specific system: ensure we only show data from selected season
       current_data <- current_data %>%
         filter(
-          # Either no NECBL match (expected only)
+          # Either no NECBL match (expected only) or exact match from selected season
           is.na(actual_woba_final) | 
-          # OR exact match from the selected season
           (grepl(paste0("_", input$primary_season, "$"), necbl_composite_key, fixed = FALSE) &
-           !is.na(actual_woba_final))
+           !is.na(actual_woba_final) &
+           (is.na(necbl_season) | necbl_season == input$primary_season))
         )
-      
-      # ADDITIONAL VERIFICATION: Remove any cross-season contamination
-      if ("necbl_season" %in% names(current_data)) {
-        current_data <- current_data %>%
-          filter(is.na(necbl_season) | necbl_season == input$primary_season)
-      }
     }
     
     # Apply PA threshold
     pa_threshold <- as.numeric(input$pa_threshold %||% 0)
     if (pa_threshold > 0) {
       current_data <- current_data %>%
-        group_by(Batter) %>%
-        filter(n() >= pa_threshold) %>%
-        ungroup()
+        filter(PA_Count >= pa_threshold)
     }
     
     return(current_data)
@@ -1246,39 +1446,37 @@ server <- function(input, output, session) {
     }
   })
   
-  # Enhanced data status with composite key info
+  # Enhanced data status with season-specific info
   output$current_data_status <- renderText({
     if (!is.null(values$enhanced_data)) {
-      total_players <- values$enhanced_data %>% 
-        distinct(Batter) %>% 
-        nrow()
+      total_players <- nrow(values$enhanced_data)
       
       if (!is.null(values$necbl_data_current)) {
         exact_matches <- sum(!is.na(values$enhanced_data$actual_woba_final))
-        paste("✅", total_players, "players,", exact_matches, "exact matches")
+        paste("✅", total_players, "players (", input$primary_season, "),", exact_matches, "exact matches")
       } else {
-        paste("📊 Expected only:", total_players, "players")
+        paste("📊 Expected only (", input$primary_season, "):", total_players, "players")
       }
     } else {
       "❌ No data loaded"
     }
   })
   
-  # NEW: Match rate display
+  # Match rate display
   output$match_rate_display <- renderText({
     if (!is.null(values$enhanced_data) && !is.null(values$necbl_data_current)) {
       total <- nrow(values$enhanced_data)
       matched <- sum(!is.na(values$enhanced_data$actual_woba_final))
       match_rate <- round(matched / total * 100, 1)
-      paste("🎯", match_rate, "% match rate")
+      paste("🎯", match_rate, "% (", input$primary_season, ")")
     } else {
       ""
     }
   })
   
-  # Load selected season with composite key matching
+  # Load selected season with season-specific matching
   observeEvent(input$load_season, {
-    withProgress(message = paste('Loading', input$primary_season, 'season with composite keys...'), value = 0, {
+    withProgress(message = paste('Loading', input$primary_season, 'season with season-specific matching...'), value = 0, {
       
       incProgress(0.3, detail = "Scraping actual data...")
       
@@ -1287,8 +1485,6 @@ server <- function(input, output, session) {
         season_data <- get_necbl_woba_by_season(input$primary_season)
         
         if (!is.null(season_data) && nrow(season_data) > 0) {
-          values$necbl_data_current <- season_data
-          
           # Update all seasons cache
           if (!is.null(values$necbl_data_all)) {
             values$necbl_data_all <- values$necbl_data_all %>%
@@ -1298,15 +1494,16 @@ server <- function(input, output, session) {
             values$necbl_data_all <- season_data
           }
           
+          values$necbl_data_current <- season_data
           values$available_seasons <- unique(values$necbl_data_all$Season)
           values$last_update <- Sys.time()
           
-          incProgress(0.6, detail = "Matching with composite keys...")
+          incProgress(0.6, detail = "Matching with season-specific data...")
           
-          # Re-match with composite keys
-          if (!is.null(values$expected_data)) {
-            values$enhanced_data <- match_necbl_data_composite(
-              values$expected_data, 
+          # Re-match with season-specific approach
+          if (!is.null(values$season_datasets)) {
+            values$enhanced_data <- match_season_specific_data(
+              values$season_datasets, 
               values$necbl_data_all, 
               input$primary_season
             )
@@ -1322,7 +1519,7 @@ server <- function(input, output, session) {
           match_rate <- round(exact_matches / total_records * 100, 1)
           
           showNotification(
-            paste("✅", input$primary_season, "loaded!", exact_matches, "exact matches (", match_rate, "%)"),
+            paste("✅", input$primary_season, "loaded! Season-specific:", exact_matches, "exact matches (", match_rate, "%)"),
             type = "message", duration = 8 
           )
         } else {
@@ -1340,9 +1537,9 @@ server <- function(input, output, session) {
     })
   })
   
-  # Load all seasons with composite key verification
+  # Load all seasons with season-specific verification
   observeEvent(input$load_all, {
-    withProgress(message = 'Loading all NECBL seasons with composite key verification...', value = 0, {
+    withProgress(message = 'Loading all NECBL seasons with season-specific matching...', value = 0, {
       
       tryCatch({
         # Use progress callback
@@ -1359,12 +1556,12 @@ server <- function(input, output, session) {
           values$available_seasons <- unique(values$necbl_data_all$Season)
           values$last_update <- Sys.time()
           
-          incProgress(0.9, detail = "Matching with composite keys...")
+          incProgress(0.9, detail = "Creating season-specific matches...")
           
-          # Re-match with composite keys
-          if (!is.null(values$expected_data)) {
-            values$enhanced_data <- match_necbl_data_composite(
-              values$expected_data, 
+          # Re-match with season-specific approach for current season
+          if (!is.null(values$season_datasets)) {
+            values$enhanced_data <- match_season_specific_data(
+              values$season_datasets, 
               values$necbl_data_all, 
               input$primary_season
             )
@@ -1373,15 +1570,15 @@ server <- function(input, output, session) {
             values$match_quality_stats <- analyze_match_quality(values$enhanced_data)
           }
           
-          incProgress(1.0, detail = "All seasons loaded with composite keys!")
+          incProgress(1.0, detail = "All seasons loaded with season-specific matching!")
           
           total_records <- nrow(values$necbl_data_all)
-          exact_matches <- sum(!is.na(values$enhanced_data$actual_woba_final))
+          current_season_matches <- sum(!is.na(values$enhanced_data$actual_woba_final))
           n_seasons <- length(values$available_seasons)
           unique_keys <- length(unique(values$necbl_data_all$Player_Team_Season_Key))
           
           showNotification(
-            paste("✅ All seasons loaded!", total_records, "records,", unique_keys, "unique composite keys,", exact_matches, "exact matches,", n_seasons, "seasons"),
+            paste("✅ All seasons loaded!", total_records, "records,", unique_keys, "unique keys,", current_season_matches, "matches for", input$primary_season, ",", n_seasons, "seasons"),
             type = "message", duration = 12
           )
         } else {
@@ -1392,13 +1589,40 @@ server <- function(input, output, session) {
       })
     })
   })
-# Enhanced performance plot with composite key info
+  
+  # Reactive to update enhanced_data when season selection changes
+  observe({
+    req(input$primary_season, values$season_datasets)
+    
+    if (input$primary_season %in% names(values$season_datasets)) {
+      # Update enhanced_data to the new season
+      if (!is.null(values$necbl_data_all)) {
+        values$enhanced_data <- match_season_specific_data(
+          values$season_datasets, 
+          values$necbl_data_all, 
+          input$primary_season
+        )
+      } else {
+        values$enhanced_data <- values$season_datasets[[input$primary_season]]
+      }
+      
+      # Update current season NECBL data
+      if (!is.null(values$necbl_data_all)) {
+        values$necbl_data_current <- values$necbl_data_all %>%
+          filter(Season == input$primary_season)
+      }
+      
+      cat("🔄 Switched to", input$primary_season, "season -", nrow(values$enhanced_data), "records\n")
+    }
+  })
+  
+  # Enhanced performance plot with season-specific info
   output$performance_plotly <- renderPlotly({
     current_data <- get_filtered_data()
     
     if (nrow(current_data) == 0) {
       p <- ggplot() + 
-        geom_text(aes(x = 0.5, y = 0.5, label = "No data available\nLoad season data first"), size = 6) +
+        geom_text(aes(x = 0.5, y = 0.5, label = paste0("No data available for ", input$primary_season, "\nLoad season data first")), size = 6) +
         theme_void()
       return(ggplotly(p))
     }
@@ -1406,32 +1630,25 @@ server <- function(input, output, session) {
     # Filter for specific player if selected
     if (!is.null(input$focus_player) && input$focus_player != "") {
       current_data <- current_data %>% filter(Batter == input$focus_player)
-      plot_title <- paste("Performance Analysis:", input$focus_player)
+      plot_title <- paste("Performance Analysis:", input$focus_player, "(", input$primary_season, ")")
     } else {
-      plot_title <- paste("Performance Analysis:", input$primary_season, "Season (Composite Key Matching)")
+      plot_title <- paste("Performance Analysis:", input$primary_season, "Season (Season-Specific)")
     }
     
-    # Calculate player-level performance metrics (only exact matches)
+    # Use current_data directly since it's already at player level
     player_performance <- current_data %>%
-      filter(!is.na(actual_woba_final)) %>%  # Only exact composite key matches
-      group_by(Batter) %>%
-      summarise(
-        xwOBA = mean(predicted_xwoba_final, na.rm = TRUE),
-        wOBA = mean(actual_woba_final, na.rm = TRUE),
-        xwOBACON = mean(predicted_xwobacon_final, na.rm = TRUE),
-        wOBACON = mean(actual_wobacon_final, na.rm = TRUE),
-        PA_Count = n(),
-        Match_Quality = first(match_quality),
-        Composite_Key = first(necbl_composite_key),
-        NECBL_Player = first(necbl_player_name),
-        Team = first(BatterTeam),
-        .groups = "drop"
+      filter(!is.na(actual_woba_final)) %>%  # Only exact season-specific matches
+      mutate(
+        Match_Quality = match_quality,
+        Composite_Key = necbl_composite_key,
+        NECBL_Player = necbl_player_name,
+        Team = BatterTeam
       )
     
     if (nrow(player_performance) == 0) {
       p <- ggplot() + 
         geom_text(aes(x = 0.5, y = 0.5, 
-                     label = paste0("No exact composite key matches for ", input$primary_season, "\n\nClick 'Load Selected Season' or check Match Quality tab")), 
+                     label = paste0("No exact season-specific matches for ", input$primary_season, "\n\nClick 'Load Selected Season' or check Match Quality tab")), 
                   size = 6, color = "#667eea") +
         theme_void()
       return(ggplotly(p))
@@ -1440,23 +1657,24 @@ server <- function(input, output, session) {
     # Select metrics based on input
     if (input$metric_type == "xwoba") {
       plot_data <- player_performance %>%
-        select(Batter, xwOBA, wOBA, PA_Count, Match_Quality, Composite_Key, NECBL_Player, Team) %>%
-        rename(Expected = xwOBA, Actual = wOBA)
+        select(Batter, xwOBA, actual_woba_final, PA_Count, Match_Quality, Composite_Key, NECBL_Player, Team) %>%
+        rename(Expected = xwOBA, Actual = actual_woba_final)
       x_label <- paste("wOBA (Actual", input$primary_season, ")")
       y_label <- "xwOBA (Expected)"
     } else {
       plot_data <- player_performance %>%
-        select(Batter, xwOBACON, wOBACON, PA_Count, Match_Quality, Composite_Key, NECBL_Player, Team) %>%
-        rename(Expected = xwOBACON, Actual = wOBACON)
+        select(Batter, xwOBACON, actual_wobacon_final, PA_Count, Match_Quality, Composite_Key, NECBL_Player, Team) %>%
+        rename(Expected = xwOBACON, Actual = actual_wobacon_final)
       x_label <- paste("wOBACON (Actual", input$primary_season, ")")
       y_label <- "xwOBACON (Expected)"
     }
     
-    # Create enhanced scatter plot with composite key info
+    # Create enhanced scatter plot with season-specific info
     p <- ggplot(plot_data, aes(x = Actual, y = Expected, text = paste(
       "Player:", Batter,
       "<br>NECBL Name:", NECBL_Player,
       "<br>Team:", Team,
+      "<br>Season:", input$primary_season,
       "<br>PAs:", PA_Count,
       "<br>Expected:", round(Expected, 3),
       "<br>Actual:", round(Actual, 3),
@@ -1487,7 +1705,7 @@ server <- function(input, output, session) {
       )
   })
   
-  # Performance summary table with composite key info
+  # Performance summary table with season-specific info
   output$performance_summary <- DT::renderDataTable({
     current_data <- get_filtered_data()
     
@@ -1495,23 +1713,24 @@ server <- function(input, output, session) {
     
     summary_data <- current_data %>%
       filter(!is.na(actual_woba_final)) %>%  # Only exact matches
-      group_by(Batter) %>%
-      summarise(
-        PA = n(),
-        xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
-        wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Expected_Team = first(BatterTeam),
-        NECBL_Player = first(necbl_player_name),
-        NECBL_Team = first(necbl_team_abbrev),
-        Composite_Key = first(necbl_composite_key),
-        Match_Quality = first(match_quality),
-        .groups = "drop"
-      ) %>%
       mutate(
-        wOBA_Diff = round(xwOBA - wOBA, 3),
-        wOBACON_Diff = round(xwOBACON - wOBACON, 3)
+        wOBA_Diff = round(xwOBA - actual_woba_final, 3),
+        wOBACON_Diff = round(xwOBACON - actual_wobacon_final, 3)
+      ) %>%
+      select(
+        Batter, Season, PA_Count, xwOBA, actual_woba_final, xwOBACON, actual_wobacon_final,
+        BatterTeam, necbl_player_name, necbl_team_abbrev, necbl_composite_key, match_quality,
+        wOBA_Diff, wOBACON_Diff
+      ) %>%
+      rename(
+        PA = PA_Count,
+        wOBA = actual_woba_final,
+        wOBACON = actual_wobacon_final,
+        Expected_Team = BatterTeam,
+        NECBL_Player = necbl_player_name,
+        NECBL_Team = necbl_team_abbrev,
+        Composite_Key = necbl_composite_key,
+        Match_Quality = match_quality
       ) %>%
       arrange(desc(abs(wOBA_Diff)))
     
@@ -1533,31 +1752,33 @@ server <- function(input, output, session) {
     
     underperformers <- current_data %>%
       filter(!is.na(actual_woba_final), !is.na(actual_wobacon_final)) %>%  # Only exact matches
-      group_by(Batter) %>%
-      summarise(
-        PA = n(),
-        xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
-        wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Expected_Team = first(BatterTeam),
-        NECBL_Player = first(necbl_player_name),
-        NECBL_Team = first(necbl_team_abbrev),
-        Composite_Key = first(necbl_composite_key),
-        Match_Quality = first(match_quality),
-        .groups = "drop"
-      ) %>%
+      filter(PA_Count >= pa_threshold) %>%
       mutate(
-        wOBA_Diff = round(xwOBA - wOBA, 3),
-        wOBACON_Diff = round(xwOBACON - wOBACON, 3)
+        wOBA_Diff = round(xwOBA - actual_woba_final, 3),
+        wOBACON_Diff = round(xwOBACON - actual_wobacon_final, 3)
       ) %>%
-      filter(PA >= pa_threshold, (wOBA_Diff > 0.025 | wOBACON_Diff > 0.025)) %>%
-      arrange(desc(wOBA_Diff))
+      filter(wOBA_Diff > 0.025 | wOBACON_Diff > 0.025) %>%
+      arrange(desc(wOBA_Diff)) %>%
+      select(
+        Batter, Season, PA_Count, xwOBA, actual_woba_final, xwOBACON, actual_wobacon_final,
+        BatterTeam, necbl_player_name, necbl_team_abbrev, necbl_composite_key, match_quality,
+        wOBA_Diff, wOBACON_Diff
+      ) %>%
+      rename(
+        PA = PA_Count,
+        wOBA = actual_woba_final,
+        wOBACON = actual_wobacon_final,
+        Expected_Team = BatterTeam,
+        NECBL_Player = necbl_player_name,
+        NECBL_Team = necbl_team_abbrev,
+        Composite_Key = necbl_composite_key,
+        Match_Quality = match_quality
+      )
     
     DT::datatable(
       underperformers,
       options = list(pageLength = 15, scrollX = TRUE),
-      caption = paste("Players Getting Unlucky - Exact Composite Key Matches Only -", input$primary_season, "Season"),
+      caption = paste("Players Getting Unlucky - Season-Specific Matches Only -", input$primary_season, "Season"),
       rownames = FALSE
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
@@ -1572,88 +1793,65 @@ server <- function(input, output, session) {
     
     overperformers <- current_data %>%
       filter(!is.na(actual_woba_final), !is.na(actual_wobacon_final)) %>%  # Only exact matches
-      group_by(Batter) %>%
-      summarise(
-        PA = n(),
-        xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
-        wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Expected_Team = first(BatterTeam),
-        NECBL_Player = first(necbl_player_name),
-        NECBL_Team = first(necbl_team_abbrev),
-        Composite_Key = first(necbl_composite_key),
-        Match_Quality = first(match_quality),
-        .groups = "drop"
-      ) %>%
+      filter(PA_Count >= pa_threshold) %>%
       mutate(
-        wOBA_Diff = round(wOBA - xwOBA, 3),
-        wOBACON_Diff = round(wOBACON - xwOBACON, 3)
+        wOBA_Diff = round(actual_woba_final - xwOBA, 3),
+        wOBACON_Diff = round(actual_wobacon_final - xwOBACON, 3)
       ) %>%
-      filter(PA >= pa_threshold, (wOBA_Diff > 0.025 | wOBACON_Diff > 0.025)) %>%
-      arrange(desc(wOBA_Diff))
+      filter(wOBA_Diff > 0.025 | wOBACON_Diff > 0.025) %>%
+      arrange(desc(wOBA_Diff)) %>%
+      select(
+        Batter, Season, PA_Count, xwOBA, actual_woba_final, xwOBACON, actual_wobacon_final,
+        BatterTeam, necbl_player_name, necbl_team_abbrev, necbl_composite_key, match_quality,
+        wOBA_Diff, wOBACON_Diff
+      ) %>%
+      rename(
+        PA = PA_Count,
+        wOBA = actual_woba_final,
+        wOBACON = actual_wobacon_final,
+        Expected_Team = BatterTeam,
+        NECBL_Player = necbl_player_name,
+        NECBL_Team = necbl_team_abbrev,
+        Composite_Key = necbl_composite_key,
+        Match_Quality = match_quality
+      )
     
     DT::datatable(
       overperformers,
       options = list(pageLength = 15, scrollX = TRUE),
-      caption = paste("Players Getting Lucky - Exact Composite Key Matches Only -", input$primary_season, "Season"),
+      caption = paste("Players Getting Lucky - Season-Specific Matches Only -", input$primary_season, "Season"),
       rownames = FALSE
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
       formatStyle(c('wOBA_Diff', 'wOBACON_Diff'), backgroundColor = '#f8d7da') %>%
       formatStyle('Match_Quality', backgroundColor = styleEqual(paste0("Exact Match (", input$primary_season, ")"), '#d4edda'))
   })
-# ===================================================================
-  # SECTION 9: MATCH QUALITY TAB SERVER LOGIC
-  # ===================================================================
   
-  # Player comparison plot with exact matches
+  # Player comparison plot with season-specific matches
   output$comparison_plot <- renderPlot({
     req(input$comp_player1, input$comp_player2)
     
-    current_data <- get_filtered_data()
-    
-    if ("Date" %in% names(current_data)) {
-      current_data <- current_data %>%
-        filter(Date >= input$comp_date_range[1], Date <= input$comp_date_range[2])
+    # For comparison, we'll use cumulative view to show multiple seasons if available
+    if (!is.null(values$season_datasets) && !is.null(values$necbl_data_all)) {
+      comparison_data <- create_cumulative_view(values$season_datasets, values$necbl_data_all, names(values$season_datasets)) %>%
+        filter(Batter %in% c(input$comp_player1, input$comp_player2))
+    } else {
+      comparison_data <- get_filtered_data() %>%
+        filter(Batter %in% c(input$comp_player1, input$comp_player2))
     }
     
-    comparison_data <- current_data %>%
-      filter(Batter %in% c(input$comp_player1, input$comp_player2)) %>%
-      arrange(if("Date" %in% names(.)) Date else row_number()) %>%
-      group_by(Batter) %>%
-      mutate(
-        PA_Number = row_number(),
-        Cumulative_xwOBA = cummean(predicted_xwoba_final),
-        Cumulative_wOBA = cummean(actual_woba_final),
-        Cumulative_xwOBACON = cummean(predicted_xwobacon_final),
-        Cumulative_wOBACON = cummean(actual_wobacon_final)
-      ) %>%
-      ungroup()
-    
     if (nrow(comparison_data) > 0) {
-      line_data <- comparison_data %>%
-        select(Batter, PA_Number, Cumulative_xwOBA, Cumulative_wOBA, Cumulative_xwOBACON, Cumulative_wOBACON) %>%
-        pivot_longer(cols = starts_with("Cumulative"), names_to = "Metric", values_to = "Value") %>%
-        mutate(
-          Metric = gsub("Cumulative_", "", Metric),
-          Line_Type = ifelse(grepl("x", Metric), "Expected", paste("Actual (Exact Match", input$primary_season, ")")),
-          Metric_Type = ifelse(grepl("OBACON", Metric), "wOBACON (Batted Balls)", "wOBA (All PAs)")
-        ) %>%
-        filter(!is.na(Value))
-      
-      ggplot(line_data, aes(x = PA_Number, y = Value, color = Batter, linetype = Line_Type)) +
+      # Create line plot showing performance by season
+      ggplot(comparison_data, aes(x = Season, y = xwOBA, color = Batter, group = Batter)) +
         geom_line(size = 1.2, alpha = 0.8) +
-        facet_wrap(~Metric_Type, scales = "free_y") +
+        geom_point(size = 3) +
+        geom_line(aes(y = actual_woba_final), linetype = "dashed", size = 1.2, alpha = 0.8) +
+        geom_point(aes(y = actual_woba_final), shape = 17, size = 3) +
         scale_color_manual(values = c("#667eea", "#764ba2")) +
-        scale_linetype_manual(values = setNames(
-          c("solid", "dashed"),
-          c("Expected", paste0("Actual (Exact Match ", input$primary_season, ")"))
-        )) +
-        labs(title = paste("Performance Comparison (Exact Composite Key Matches):", input$comp_player1, "vs", input$comp_player2),
-             subtitle = paste("Cumulative performance -", input$primary_season, "season exact matches only"),
-             x = "Plate Appearance Number", y = "Cumulative Value",
-             color = "Player", linetype = "Type") +
+        labs(title = paste("Season Comparison:", input$comp_player1, "vs", input$comp_player2),
+             subtitle = "Solid line = Expected (xwOBA), Dashed line = Actual (wOBA), Triangles = Actual",
+             x = "Season", y = "wOBA Value",
+             color = "Player") +
         theme_minimal() +
         theme(
           plot.title = element_text(size = 16, face = "bold"),
@@ -1661,54 +1859,60 @@ server <- function(input, output, session) {
         )
     } else {
       ggplot() + 
-        geom_text(aes(x = 0.5, y = 0.5, label = "No exact composite key matches for selected players"), size = 6) +
+        geom_text(aes(x = 0.5, y = 0.5, label = "No season-specific matches for selected players"), size = 6) +
         theme_void()
     }
   })
   
-  # Comparison summary table with composite key info
+  # Comparison summary table with season-specific info
   output$comparison_summary_table <- DT::renderDataTable({
     req(input$comp_player1, input$comp_player2)
     
-    current_data <- get_filtered_data()
-    
-    if ("Date" %in% names(current_data)) {
-      current_data <- current_data %>%
-        filter(Date >= input$comp_date_range[1], Date <= input$comp_date_range[2])
+    # Use cumulative view for comparison
+    if (!is.null(values$season_datasets) && !is.null(values$necbl_data_all)) {
+      comparison_data <- create_cumulative_view(values$season_datasets, values$necbl_data_all, names(values$season_datasets)) %>%
+        filter(Batter %in% c(input$comp_player1, input$comp_player2))
+    } else {
+      comparison_data <- get_filtered_data() %>%
+        filter(Batter %in% c(input$comp_player1, input$comp_player2))
     }
     
-    comparison_summary <- current_data %>%
-      filter(Batter %in% c(input$comp_player1, input$comp_player2)) %>%
-      group_by(Batter) %>%
-      summarise(
-        PA = n(),
-        Avg_xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        Avg_wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        Avg_xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
-        Avg_wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
-        wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Expected_Team = first(BatterTeam),
-        NECBL_Player = first(necbl_player_name),
-        NECBL_Team = first(necbl_team_abbrev),
-        Composite_Key = first(necbl_composite_key),
-        Match_Quality = first(match_quality),
-        Has_Exact_Match = !all(is.na(actual_woba_final)),
-        .groups = "drop"
+    comparison_summary <- comparison_data %>%
+      mutate(
+        wOBA_Gap = round(xwOBA - actual_woba_final, 3),
+        wOBACON_Gap = round(xwOBACON - actual_wobacon_final, 3),
+        Has_Exact_Match = !is.na(actual_woba_final)
+      ) %>%
+      select(
+        Batter, Season, PA_Count, xwOBA, actual_woba_final, xwOBACON, actual_wobacon_final,
+        BatterTeam, necbl_player_name, necbl_team_abbrev, necbl_composite_key, match_quality,
+        wOBA_Gap, wOBACON_Gap, Has_Exact_Match
+      ) %>%
+      rename(
+        PA = PA_Count,
+        Avg_xwOBA = xwOBA,
+        Avg_wOBA = actual_woba_final,
+        Avg_xwOBACON = xwOBACON,
+        Avg_wOBACON = actual_wobacon_final,
+        Expected_Team = BatterTeam,
+        NECBL_Player = necbl_player_name,
+        NECBL_Team = necbl_team_abbrev,
+        Composite_Key = necbl_composite_key,
+        Match_Quality = match_quality
       )
     
     DT::datatable(
       comparison_summary,
       options = list(pageLength = 15, scrollX = TRUE),
-      caption = paste("Player Comparison Summary - Exact Composite Key Matches -", input$primary_season, "Season"),
+      caption = "Player Comparison Summary - Season-Specific Matches",
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_xwOBACON', 'Avg_wOBACON', 'wOBA_Gap', 'wOBACON_Gap'), digits = 3) %>%
       formatStyle('Has_Exact_Match', backgroundColor = styleEqual(TRUE, '#d4edda')) %>%
-      formatStyle('Match_Quality', backgroundColor = styleEqual(paste0("Exact Match (", input$primary_season, ")"), '#d4edda'))
+      formatStyle('Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd'))
   })
   
-  # Enhanced team browser with composite key filtering
+  # Enhanced team browser with season-specific filtering
   output$browser_table <- DT::renderDataTable({
     current_data <- get_filtered_data()
     
@@ -1723,33 +1927,24 @@ server <- function(input, output, session) {
     }
     
     browser_data <- current_data %>%
-      group_by(Batter) %>%
-      summarise(
-        PA_Count = n(),
-        Avg_xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
-        Avg_wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
-        Avg_xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
-        Avg_wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
-        wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
-        wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
-        Expected_Team = first(BatterTeam),
-        NECBL_Player = first(necbl_player_name),
-        NECBL_Team = first(necbl_team_abbrev),
-        Composite_Key = first(necbl_composite_key),
-        Match_Quality = first(match_quality),
-        Has_Exact_Match = !all(is.na(actual_woba_final)),
-        .groups = "drop"
+      mutate(
+        Avg_xwOBA = xwOBA,
+        Avg_wOBA = actual_woba_final,
+        Avg_xwOBACON = xwOBACON,
+        Avg_wOBACON = actual_wobacon_final,
+        wOBA_Gap = round(xwOBA - actual_woba_final, 3),
+        wOBACON_Gap = round(xwOBACON - actual_wobacon_final, 3),
+        Expected_Team = BatterTeam,
+        NECBL_Player = necbl_player_name,
+        NECBL_Team = necbl_team_abbrev,
+        Composite_Key = necbl_composite_key,
+        Match_Quality = match_quality,
+        Has_Exact_Match = !is.na(actual_woba_final)
       )
     
     # Apply exact match filter if requested
     if (!is.null(input$show_only_matched) && input$show_only_matched) {
       browser_data <- browser_data %>% filter(Has_Exact_Match)
-    }
-    
-    # For composite key system: only show players with exact matches from selected season
-    if (!is.null(input$season_scope) && input$season_scope == "selected") {
-      browser_data <- browser_data %>% 
-        filter(Has_Exact_Match & grepl(paste0("_", input$primary_season, "$"), Composite_Key, fixed = FALSE))
     }
     
     browser_data <- browser_data %>%
@@ -1758,7 +1953,7 @@ server <- function(input, output, session) {
     DT::datatable(
       browser_data,
       options = list(pageLength = 25, scrollX = TRUE),
-      caption = paste("Team & Player Browser - Composite Key System -", input$primary_season, "Season Focus"),
+      caption = paste("Team & Player Browser - Season-Specific System -", input$primary_season, "Season"),
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_xwOBACON', 'Avg_wOBACON', 'wOBA_Gap', 'wOBACON_Gap'), digits = 3) %>%
@@ -1766,53 +1961,45 @@ server <- function(input, output, session) {
       formatStyle('Match_Quality', backgroundColor = styleEqual(paste0("Exact Match (", input$primary_season, ")"), '#d4edda'))
   })
   
-  # Match rate by season analysis
+  # All the Match Quality tab outputs (same as before but with season-specific data)
   output$match_rate_by_season <- DT::renderDataTable({
     req(values$enhanced_data, values$necbl_data_all)
     
     # Calculate match rates across all available seasons
     season_analysis <- data.frame()
     
-    for (season in sort(unique(values$necbl_data_all$Season))) {
-      # Get expected data composite keys for this season
-      expected_keys_season <- values$expected_data %>%
-        mutate(
-          Last_Name = toupper(trimws(sub(",.*", "", Batter))),
-          First_Initial = toupper(substr(trimws(sub(".*,\\s*", "", Batter)), 1, 1)),
-          Team_Abbrev = sapply(BatterTeam, function(x) {
-            team_info <- necbl_team_mapping_enhanced[[x]]
-            if (!is.null(team_info)) team_info$abbrev else "UNK"
-          }),
-          Expected_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, season)
-        ) %>%
-        distinct(Batter, Expected_Key)
-      
-      # Get NECBL keys for this season
-      necbl_keys_season <- values$necbl_data_all %>%
-        filter(Season == season) %>%
-        distinct(Player_Team_Season_Key)
-      
-      # Calculate matches
-      matches <- sum(expected_keys_season$Expected_Key %in% necbl_keys_season$Player_Team_Season_Key)
-      total_expected <- nrow(expected_keys_season)
-      total_necbl <- nrow(necbl_keys_season)
-      
-      season_row <- data.frame(
-        Season = season,
-        Expected_Players = total_expected,
-        NECBL_Players = total_necbl,
-        Exact_Matches = matches,
-        Match_Rate = round(matches / total_expected * 100, 1),
-        Coverage = paste0(matches, "/", total_expected)
-      )
-      
-      season_analysis <- rbind(season_analysis, season_row)
+    if (!is.null(values$season_datasets)) {
+      for (season in sort(names(values$season_datasets))) {
+        # Get expected data for this season
+        expected_season <- values$season_datasets[[season]]
+        
+        # Get NECBL keys for this season
+        necbl_keys_season <- values$necbl_data_all %>%
+          filter(Season == season) %>%
+          distinct(Player_Team_Season_Key)
+        
+        # Calculate matches
+        matches <- sum(expected_season$Composite_Key %in% necbl_keys_season$Player_Team_Season_Key)
+        total_expected <- nrow(expected_season)
+        total_necbl <- nrow(necbl_keys_season)
+        
+        season_row <- data.frame(
+          Season = season,
+          Expected_Players = total_expected,
+          NECBL_Players = total_necbl,
+          Exact_Matches = matches,
+          Match_Rate = round(matches / total_expected * 100, 1),
+          Coverage = paste0(matches, "/", total_expected)
+        )
+        
+        season_analysis <- rbind(season_analysis, season_row)
+      }
     }
     
     DT::datatable(
       season_analysis,
       options = list(pageLength = 10, dom = 't'),
-      caption = "Composite Key Match Rates by Season",
+      caption = "Season-Specific Match Rates by Season",
       rownames = FALSE
     ) %>%
       formatStyle('Season', backgroundColor = styleEqual(input$primary_season, '#fff3cd')) %>%
@@ -1820,14 +2007,14 @@ server <- function(input, output, session) {
                   backgroundColor = styleInterval(c(50, 75), c('#f8d7da', '#fff3cd', '#d4edda')))
   })
   
-  # Match rate by team analysis
+  # Match rate by team analysis (using current season data)
   output$match_rate_by_team <- DT::renderDataTable({
     req(values$enhanced_data)
     
     team_analysis <- values$enhanced_data %>%
       group_by(BatterTeam) %>%
       summarise(
-        Total_Players = n_distinct(Batter),
+        Total_Players = n(),
         Exact_Matches = sum(!is.na(actual_woba_final)),
         Match_Rate = round(Exact_Matches / Total_Players * 100, 1),
         Team_Name = first(sapply(BatterTeam, function(x) {
@@ -1846,7 +2033,7 @@ server <- function(input, output, session) {
     DT::datatable(
       team_analysis,
       options = list(pageLength = 15, dom = 't'),
-      caption = paste("Composite Key Match Rates by Team -", input$primary_season, "Season Focus"),
+      caption = paste("Season-Specific Match Rates by Team -", input$primary_season, "Season"),
       rownames = FALSE
     ) %>%
       formatStyle('Match_Rate', 
@@ -1859,7 +2046,7 @@ server <- function(input, output, session) {
     
     successful_sample <- values$enhanced_data %>%
       filter(!is.na(actual_woba_final)) %>%
-      distinct(Batter, .keep_all = TRUE) %>%
+      head(10) %>%
       select(
         Expected_Player = Batter,
         Expected_Team = BatterTeam,
@@ -1867,21 +2054,21 @@ server <- function(input, output, session) {
         NECBL_Team = necbl_team_abbrev,
         Composite_Key = necbl_composite_key,
         Match_Quality = match_quality,
-        Expected_xwOBA = predicted_xwoba_final,
+        Season,
+        Expected_xwOBA = xwOBA,
         Actual_wOBA = actual_woba_final,
-        Difference = predicted_xwoba_final - actual_woba_final
+        Difference = xwOBA - actual_woba_final
       ) %>%
       mutate(
         Difference = round(Difference, 3),
         Expected_xwOBA = round(Expected_xwOBA, 3),
         Actual_wOBA = round(Actual_wOBA, 3)
-      ) %>%
-      head(10)
+      )
     
     DT::datatable(
       successful_sample,
       options = list(pageLength = 10, scrollX = TRUE),
-      caption = "Sample Successful Composite Key Matches",
+      caption = "Sample Successful Season-Specific Matches",
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Expected_xwOBA', 'Actual_wOBA', 'Difference'), digits = 3) %>%
@@ -1897,23 +2084,13 @@ server <- function(input, output, session) {
     
     unmatched_sample <- values$enhanced_data %>%
       filter(is.na(actual_woba_final)) %>%
-      distinct(Batter, BatterTeam) %>%
-      mutate(
-        Last_Name = toupper(trimws(sub(",.*", "", Batter))),
-        First_Initial = toupper(substr(trimws(sub(".*,\\s*", "", Batter)), 1, 1)),
-        Team_Abbrev = sapply(BatterTeam, function(x) {
-          team_info <- necbl_team_mapping_enhanced[[x]]
-          if (!is.null(team_info)) team_info$abbrev else "UNK"
-        }),
-        Expected_Composite_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, input$primary_season)
-      ) %>%
+      head(10) %>%
       select(
         Expected_Player = Batter,
         Expected_Team = BatterTeam,
-        Team_Abbrev,
-        Expected_Composite_Key
-      ) %>%
-      head(10)
+        Season,
+        Expected_Composite_Key = Composite_Key
+      )
     
     DT::datatable(
       unmatched_sample,
@@ -1937,7 +2114,8 @@ server <- function(input, output, session) {
         Composite_Key = Player_Team_Season_Key,
         wOBA,
         wOBACON,
-        PA
+        PA,
+        Season
       ) %>%
       mutate(
         wOBA = round(wOBA, 3),
@@ -1960,40 +2138,26 @@ server <- function(input, output, session) {
   
   # Expected data sample keys for verification
   output$expected_keys_sample <- DT::renderDataTable({
-    req(values$expected_data)
+    req(values$enhanced_data)
     
-    expected_sample <- values$expected_data %>%
-      distinct(Batter, BatterTeam) %>%
-      mutate(
-        Last_Name = toupper(trimws(sub(",.*", "", Batter))),
-        First_Initial = toupper(substr(trimws(sub(".*,\\s*", "", Batter)), 1, 1)),
-        Team_Abbrev = sapply(BatterTeam, function(x) {
-          team_info <- necbl_team_mapping_enhanced[[x]]
-          if (!is.null(team_info)) team_info$abbrev else "UNK"
-        }),
-        Expected_Composite_Key = create_composite_key(Last_Name, First_Initial, Team_Abbrev, input$primary_season)
-      ) %>%
+    expected_sample <- values$enhanced_data %>%
+      head(15) %>%
       select(
         Expected_Player = Batter,
         Expected_Team = BatterTeam,
-        Parsed_Last = Last_Name,
-        Parsed_Initial = First_Initial,
-        Team_Abbrev,
-        Expected_Composite_Key
-      ) %>%
-      head(15)
+        Season,
+        Expected_Composite_Key = Composite_Key
+      )
     
     DT::datatable(
       expected_sample,
       options = list(pageLength = 15, scrollX = TRUE),
-      caption = "Expected Data Composite Key Generation",
+      caption = paste("Expected Data Composite Key Generation -", input$primary_season, "Season"),
       rownames = FALSE
     ) %>%
       formatStyle('Expected_Composite_Key', 
                   backgroundColor = '#e9ecef',
-                  fontFamily = 'Courier New, monospace') %>%
-      formatStyle('Team_Abbrev', 
-                  backgroundColor = styleEqual("UNK", '#fff3cd'))
+                  fontFamily = 'Courier New, monospace')
   })
   
   # NECBL data verification keys
@@ -2027,6 +2191,7 @@ server <- function(input, output, session) {
   })
 
 }
+
 # ===================================================================
 # SECTION 10: FINAL LAUNCH FUNCTIONS AND USAGE INSTRUCTIONS
 # ===================================================================
