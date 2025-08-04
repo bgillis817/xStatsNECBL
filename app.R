@@ -499,8 +499,8 @@ run_complete_xwoba_pipeline <- function(folder_path = "Navs CSVs", use_google_dr
   if (is.null(combined_data)) return(NULL)
   
   # Save combined data
-  saveRDS(combined_data, "navs_all_data.rds")
-  cat("Saved combined data as navs_all_data.rds\n")
+ # saveRDS(combined_data, "navs_all_data.rds")
+cat("Data processed\n")
   
   # Phase 2: Clean and standardize
   cat("\nPHASE 2: DATA CLEANING\n")
@@ -797,7 +797,7 @@ library(xgboost)
 library(dplyr)
 
 # Load data
-raw_data <- readRDS('navs_all_data.rds')
+raw_data <- readRDS(url("https://drive.google.com/uc?export=download&id=1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"))
 
 # Feature Engineering Function
 create_ultimate_features <- function(raw_data) {
@@ -3195,4 +3195,5 @@ assign("launch_xwoba_dashboard_composite", launch_xwoba_dashboard_composite, env
 assign("verify_data_readiness", verify_data_readiness, envir = .GlobalEnv)
 assign("test_composite_key_system", test_composite_key_system, envir = .GlobalEnv)
 assign("print_usage_instructions", print_usage_instructions, envir = .GlobalEnv)
+
 assign("quick_composite_test", quick_composite_test, envir = .GlobalEnv)
