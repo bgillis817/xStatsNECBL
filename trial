@@ -608,22 +608,29 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       batter_name <- as.character(expected_with_keys$Batter[i])
       
       if (!is.na(batter_name) && nchar(str_trim(batter_name)) > 0) {
-        # Parse the name
-        if (grepl(",", batter_name)) {
-          # "Last, First" format (like "Kea, Jaydon")
-          parts <- str_split(batter_name, ",")[[1]]
+        
+        # CRITICAL FIX: Clean model names the same way as Pointstreak
+        clean_batter <- iconv(batter_name, to = "ASCII//TRANSLIT")  # López → Lopez  
+        clean_batter <- gsub("'", "", clean_batter)  # O'Neill → ONeill, O'Connor → OConnor
+        clean_batter <- gsub("[^A-Za-z\\s,.-]", "", clean_batter)  # Remove special chars
+        clean_batter <- str_trim(clean_batter)
+        
+        # Parse the cleaned name
+        if (grepl(",", clean_batter)) {
+          # "Last, First" format (like "Stang, Bobby" or "Stang, Robert")
+          parts <- str_split(clean_batter, ",")[[1]]
           if (length(parts) >= 2) {
             # CRITICAL: Extract exactly what Pointstreak does
             expected_with_keys$Model_Last_Name[i] <- toupper(str_trim(parts[1]))
             first_part <- str_trim(parts[2])
-            # CRITICAL: Take ONLY first letter, uppercase, exactly like Pointstreak
+            # CRITICAL: Take ONLY first letter, uppercase (Bobby→B, Robert→R, but both→same person!)
             expected_with_keys$Model_First_Initial[i] <- toupper(substr(first_part, 1, 1))
           }
         } else {
-          # "First Last" format (like "Jaydon Kea")
-          words <- str_trim(str_split(batter_name, "\\s+")[[1]])
+          # "First Last" format (like "Bobby Stang" or "Robert Stang")
+          words <- str_trim(str_split(clean_batter, "\\s+")[[1]])
           if (length(words) >= 2) {
-            # CRITICAL: Take ONLY first letter, uppercase, exactly like Pointstreak
+            # CRITICAL: Take ONLY first letter, uppercase (Bobby→B, Robert→R)
             expected_with_keys$Model_First_Initial[i] <- toupper(substr(words[1], 1, 1))
             expected_with_keys$Model_Last_Name[i] <- toupper(paste(words[2:length(words)], collapse = " "))
           } else if (length(words) == 1) {
