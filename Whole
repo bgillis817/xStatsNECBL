@@ -2254,8 +2254,9 @@ ui <- dashboardPage(
               ),
               column(3, 
                 selectInput("season_scope", "Show Players:", 
-                           choices = c("NECBL" = "matched"), 
-                           selected = "matched")
+                           choices = c("Selected Season Only" = "selected", 
+                                     "All Available Seasons" = "all"), 
+                           selected = "selected")
               ),
               column(3, 
                 selectInput("pa_threshold", "Minimum PAs:", 
@@ -3197,7 +3198,3 @@ assign("verify_data_readiness", verify_data_readiness, envir = .GlobalEnv)
 assign("test_composite_key_system", test_composite_key_system, envir = .GlobalEnv)
 assign("print_usage_instructions", print_usage_instructions, envir = .GlobalEnv)
 assign("quick_composite_test", quick_composite_test, envir = .GlobalEnv)
-
-quick_composite_test()
-
-launch_xwoba_dashboard_composite()
