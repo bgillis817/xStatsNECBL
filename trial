@@ -971,7 +971,7 @@ ui <- dashboardPage(
   
   dashboardSidebar(
     sidebarMenu(
-      menuItem("Performance Analysis", tabName = "performance", icon = icon("chart-line")),
+      menuItem("xwOBA vs. wOBA", tabName = "performance", icon = icon("chart-line")),
       menuItem("Underperformers", tabName = "underperform", icon = icon("arrow-down")),
       menuItem("Overperformers", tabName = "overperform", icon = icon("arrow-up")),
       menuItem("Player Comparison", tabName = "comparison", icon = icon("balance-scale")),
@@ -1053,7 +1053,7 @@ ui <- dashboardPage(
         
         fluidRow(
           box(
-            title = "Expected vs Actual Performance", status = "primary", solidHeader = TRUE, width = 12,
+            title = "Expected vs Actual", status = "primary", solidHeader = TRUE, width = 12,
             plotlyOutput("performance_plotly", height = "600px")
           )
         ),
@@ -1065,7 +1065,7 @@ ui <- dashboardPage(
                        choices = c("All Players" = ""), selected = "")
           ),
           box(
-            title = "Performance Summary", status = "info", solidHeader = TRUE, width = 8,
+            title = "Summary", status = "info", solidHeader = TRUE, width = 8,
             DT::dataTableOutput("performance_summary")
           )
         )
@@ -1113,7 +1113,7 @@ ui <- dashboardPage(
         
         fluidRow(
           box(
-            title = "Performance Comparison", status = "primary", solidHeader = TRUE, width = 12,
+            title = "Comparison", status = "primary", solidHeader = TRUE, width = 12,
             plotOutput("comparison_plot", height = "500px")
           )
         ),
@@ -1360,9 +1360,9 @@ server <- function(input, output, session) {
     # Filter for specific player if selected
     if (!is.null(input$focus_player) && input$focus_player != "") {
       current_data <- current_data %>% filter(Batter == input$focus_player)
-      plot_title <- paste("Performance Analysis:", input$focus_player, "(", input$primary_season, ")")
+      plot_title <- paste("xwOBA vs. xwOBA:", input$focus_player, "(", input$primary_season, ")")
     } else {
-      plot_title <- paste("Performance Analysis:", input$primary_season, "Season")
+      plot_title <- paste("xwOBA vs. wOBA:", input$primary_season, "Season")
     }
     
     # Calculate player-level performance metrics - SEASON-AWARE
@@ -1465,7 +1465,7 @@ server <- function(input, output, session) {
     DT::datatable(
       summary_data,
       options = list(pageLength = 10, scrollX = TRUE),
-      caption = paste("Performance Summary -", input$primary_season, "Season Only"),
+      caption = paste("Summary -", input$primary_season, "Season Only"),
       rownames = FALSE
     ) %>%
       formatRound(columns = c('xwOBA', 'wOBA', 'xwOBACON', 'wOBACON', 'wOBA_Diff', 'wOBACON_Diff'), digits = 3) %>%
@@ -1584,7 +1584,7 @@ output$comparison_plot <- renderPlot({
         c("solid", "dashed"),
         c("Expected", paste0("Actual ", input$primary_season))
       )) +
-      labs(title = paste("Performance Comparison (", input$primary_season, " Season):", input$comp_player1, "vs", input$comp_player2),
+      labs(title = paste("Comparison (", input$primary_season, " Season):", input$comp_player1, "vs", input$comp_player2),
            subtitle = paste("Cumulative performance -", input$primary_season, "season"),
            x = "Plate Appearance Number", y = "Cumulative Value",
            color = "Player", linetype = "Type") +
