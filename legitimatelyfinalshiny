@@ -288,6 +288,38 @@ create_composite_key <- function(last_name, first_initial, team_abbrev, season) 
   )
 }
 
+# ROBUST NAME NORMALIZATION FUNCTION
+# Converts any name format to "LASTNAME, F" (capitalized, first initial only)
+normalize_player_name <- function(name) {
+  name <- str_trim(toupper(name))  # Capitalize everything and trim
+  
+  # Handle specific known cases first
+  if (grepl("JAYDON AUKAI KEA", name)) {
+    return("KEA, J")
+  }
+  
+  # If already in "LASTNAME, FIRSTNAME" format
+  if (grepl(",", name)) {
+    parts <- str_split(name, ",")[[1]]
+    last_name <- str_trim(parts[1])
+    first_part <- str_trim(parts[2])
+    first_initial <- substr(first_part, 1, 1)
+    return(paste0(last_name, ", ", first_initial))
+  }
+  
+  # If in "FIRSTNAME LASTNAME" or "FIRSTNAME MIDDLENAME LASTNAME" format
+  words <- str_split(name, "\\s+")[[1]]
+  if (length(words) >= 2) {
+    first_name <- words[1]
+    last_name <- words[length(words)]  # Take the last word as last name
+    first_initial <- substr(first_name, 1, 1)
+    return(paste0(last_name, ", ", first_initial))
+  }
+  
+  # If only one word, treat as last name
+  return(paste0(name, ", ", substr(name, 1, 1)))
+}
+
 # Helper function to extract team info from model team codes
 get_team_info_from_model_code <- function(model_team_code) {
   team_info <- necbl_team_mapping_enhanced[[model_team_code]]
