@@ -527,20 +527,19 @@ cat("Data processed\n")
     sweet_spot_analysis = sweet_spot_analysis
   )
   
-  saveRDS(final_package, "xwoba_data_engineering_package.rds")
-  write.csv(cbind(training_package$features, training_package$targets), 
-            "xwoba_training_data.csv", row.names = FALSE)
+  #saveRDS(final_package, "xwoba_data_engineering_package.rds")
+ # write.csv(cbind(training_package$features, training_package$targets), 
+         #   "xwoba_training_data.csv", row.names = FALSE)
   
   cat("\n PIPELINE COMPLETE\n")
   cat("=====================\n")
   cat("Combined", nrow(clean_data), "balls in play\n")
   cat("Created", ncol(features), "features\n")
   cat("Sweet spot analysis complete\n")
-  cat("Files created:\n")
-  cat("   - xwoba_data_engineering_package.rds\n")
-  cat("   - xwoba_training_data.csv\n")
-  cat("   - navs_all_data.rds\n")
-  
+cat("Files created:\n")
+cat("   - xwoba_data_engineering_package.rds\n")
+cat("   - xwoba_training_data.csv\n")
+cat("   - data processed\n")
   return(final_package)
 }
 library(googledrive)
@@ -3197,3 +3196,4 @@ assign("test_composite_key_system", test_composite_key_system, envir = .GlobalEn
 assign("print_usage_instructions", print_usage_instructions, envir = .GlobalEnv)
 
 assign("quick_composite_test", quick_composite_test, envir = .GlobalEnv)
+
