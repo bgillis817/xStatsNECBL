@@ -1255,8 +1255,6 @@ library(plotly)
 # ===================================================================
 
 # Enhanced xwOBA calculation with proper PA integration - SEASON-AWARE VERSION
-calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
-  cat("=== CALCULATING EXPECTED xwOBA WITH PROPER PA INTEGRATION (SEASON-AWARE) ===\n")
   
   # CRITICAL FIX: Add season extraction BEFORE any processing
   if ("Date" %in% names(raw_data)) {
