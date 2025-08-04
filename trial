@@ -418,8 +418,14 @@ get_necbl_woba_by_season <- function(season = "2025") {
                                      triples_val * 1.616 + hr_val * 2.101) / Batted_Balls
                   
                   # ===================================================================
-                  # CRITICAL FIX: ENHANCED PLAYER NAME PARSING FOR OUTLIERS
+                  # CRITICAL FIX: STANDARDIZE TO "LASTNAME, F" FORMAT - CAPITALIZE EVERYTHING
                   # ===================================================================
+                  
+                  # Initialize variables to ensure they exist in all code paths
+                  last_name <- ""
+                  first_name <- ""
+                  first_initial <- ""
+                  standardized_name <- ""
                   
                   # Step 1: Clean the raw name (remove X, numbers, etc.)
                   clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s,.-]", ""))
@@ -443,27 +449,48 @@ get_necbl_woba_by_season <- function(season = "2025") {
                         first_initial <- toupper(substr(first_name, 1, 1))
                         
                         cat("    🔧 OUTLIER NAME PARSED:", clean_name, "->", 
-                            paste(last_name, first_initial, sep=", "), "\n")
+                            paste(toupper(last_name), first_initial, sep=", "), "\n")
                       } else {
-                        # Fallback to standard parsing
+                        # Fallback to standard parsing if parentheses don't have enough parts
                         if (grepl(",", clean_name)) {
                           parts <- str_split(clean_name, ",")[[1]]
                           last_name <- str_trim(parts[1])
                           first_part <- str_trim(parts[2])
                           first_words <- str_split(first_part, "\\s+")[[1]]
                           first_name <- first_words[1]
-                          first_initial <- substr(first_name, 1, 1)
+                          first_initial <- toupper(substr(first_name, 1, 1))
                         } else {
                           words <- str_split(clean_name, "\\s+")[[1]]
                           if (length(words) >= 2) {
                             first_name <- words[1]
-                            first_initial <- substr(first_name, 1, 1)
+                            first_initial <- toupper(substr(first_name, 1, 1))
                             last_name <- paste(words[2:length(words)], collapse = " ")
                           } else {
                             last_name <- clean_name
                             first_name <- substr(clean_name, 1, 1)
-                            first_initial <- substr(clean_name, 1, 1)
+                            first_initial <- toupper(substr(clean_name, 1, 1))
                           }
+                        }
+                      }
+                    } else {
+                      # If parentheses extraction fails, fall back to standard parsing
+                      if (grepl(",", clean_name)) {
+                        parts <- str_split(clean_name, ",")[[1]]
+                        last_name <- str_trim(parts[1])
+                        first_part <- str_trim(parts[2])
+                        first_words <- str_split(first_part, "\\s+")[[1]]
+                        first_name <- first_words[1]
+                        first_initial <- toupper(substr(first_name, 1, 1))
+                      } else {
+                        words <- str_split(clean_name, "\\s+")[[1]]
+                        if (length(words) >= 2) {
+                          first_name <- words[1]
+                          first_initial <- toupper(substr(first_name, 1, 1))
+                          last_name <- paste(words[2:length(words)], collapse = " ")
+                        } else {
+                          last_name <- clean_name
+                          first_name <- substr(clean_name, 1, 1)
+                          first_initial <- toupper(substr(clean_name, 1, 1))
                         }
                       }
                     }
@@ -477,24 +504,31 @@ get_necbl_woba_by_season <- function(season = "2025") {
                       # Extract first name and first initial
                       first_words <- str_split(first_part, "\\s+")[[1]]
                       first_name <- first_words[1]
-                      first_initial <- substr(first_name, 1, 1)
+                      first_initial <- toupper(substr(first_name, 1, 1))
                       
                     } else {
                       words <- str_split(clean_name, "\\s+")[[1]]
                       if (length(words) >= 2) {
                         first_name <- words[1]
-                        first_initial <- substr(first_name, 1, 1)
+                        first_initial <- toupper(substr(first_name, 1, 1))
                         last_name <- paste(words[2:length(words)], collapse = " ")
                       } else {
                         last_name <- clean_name
                         first_name <- substr(clean_name, 1, 1)
-                        first_initial <- substr(clean_name, 1, 1)
+                        first_initial <- toupper(substr(clean_name, 1, 1))
                       }
                     }
                   }
                   
+                  # STEP 4: STANDARDIZE TO CAPITALIZED "LASTNAME, F" FORMAT
+                  # Ensure variables are not empty before creating standardized name
+                  if (nchar(str_trim(last_name)) == 0) last_name <- "UNKNOWN"
+                  if (nchar(str_trim(first_initial)) == 0) first_initial <- "X"
+                  
+                  standardized_name <- paste(toupper(str_trim(last_name)), toupper(str_trim(first_initial)), sep = ", ")
+                  
                   # ===================================================================
-                  # END OF ENHANCED NAME PARSING
+                  # END OF STANDARDIZED NAME PARSING
                   # ===================================================================
                   
                   # Generate composite key for this parsed name
