@@ -372,6 +372,11 @@ get_necbl_woba_by_season <- function(season = "2025") {
               tryCatch({
                 player_raw <- as.character(table[row_idx, 1])
                 
+                # DEBUG: Log every player name for North Shore Navigators (team_id 154432)
+                if (team_id == "154432") {
+                  cat("DEBUG NSN - Row", row_idx, "- Raw player name:", player_raw, "\n")
+                }
+                
                 # Skip invalid rows
                 if (is.na(player_raw) || nchar(trimws(player_raw)) < 3 || 
                     grepl("Total|AVG|OBP|SLG|---|^\\s*$|Player", player_raw, ignore.case = TRUE)) {
@@ -421,28 +426,40 @@ get_necbl_woba_by_season <- function(season = "2025") {
                   # Enhanced player name parsing for composite key generation
                   clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s,.-]", ""))
                   
+                  # CRITICAL FIX: Remove jersey numbers (e.g., "#50 Jaydon Aukai Kea")
+                  clean_name <- str_trim(gsub("^#?\\d+\\s+", "", clean_name))
+                  
                   # CRITICAL FIX: Remove unwanted "X" characters from pointstreak names
                   # Remove leading "X " or "x " that appears in some NECBL data
                   clean_name <- str_trim(gsub("^[Xx]\\s+", "", clean_name))
                   
-                  # DEBUG: Log the original and cleaned name for Kea
-                  if (grepl("Kea", clean_name, ignore.case = TRUE)) {
-                    cat("DEBUG - Original player_raw:", player_raw, "\n")
-                    cat("DEBUG - Cleaned name:", clean_name, "\n")
+                  # DEBUG: Log the original and cleaned name for NSN
+                  if (team_id == "154432") {
+                    cat("DEBUG NSN - After cleaning:", clean_name, "\n")
                   }
                   
-                  # SPECIAL CASE: Handle any Kea name variations
-                  if (grepl("Kea", clean_name, ignore.case = TRUE)) {
-                    # If it contains "Jaydon Aukai Kea" or similar, normalize to "Kea, J"
-                    if (grepl("Jaydon.*Kea", clean_name, ignore.case = TRUE) || 
-                        grepl("Aukai.*Kea", clean_name, ignore.case = TRUE)) {
+                  # SPECIAL CASE: Handle "Jaydon Aukai Kea" -> "Kea, J"
+                  if (grepl("Jaydon Aukai Kea", clean_name, ignore.case = TRUE)) {
+                    clean_name <- "Kea, J"
+                    cat("DEBUG - Converted 'Jaydon Aukai Kea' to:", clean_name, "\n")
+                  }
+                  # Handle other Kea variations
+                  else if (grepl("Kea", clean_name, ignore.case = TRUE)) {
+                    cat("DEBUG - Found other Kea variant:", clean_name, "\n")
+                    # If it contains "Aukai Kea", normalize to "Kea, J"
+                    if (grepl("Aukai.*Kea", clean_name, ignore.case = TRUE)) {
                       clean_name <- "Kea, J"
-                      cat("DEBUG - Normalized Kea name to:", clean_name, "\n")
+                      cat("DEBUG - Normalized Aukai Kea to:", clean_name, "\n")
                     }
                     # If it's already "Kea, J" format, keep it
                     else if (grepl("Kea,\\s*J", clean_name, ignore.case = TRUE)) {
                       clean_name <- "Kea, J"
                       cat("DEBUG - Kept Kea name as:", clean_name, "\n")
+                    }
+                    # Handle "J Kea" or "J. Kea" format (first name first)
+                    else if (grepl("^J\\.?\\s+Kea", clean_name, ignore.case = TRUE)) {
+                      clean_name <- "Kea, J"
+                      cat("DEBUG - Converted 'J Kea' to:", clean_name, "\n")
                     }
                   }
                   
@@ -472,6 +489,11 @@ get_necbl_woba_by_season <- function(season = "2025") {
                   
                   # COMPOSITE KEY GENERATION - This is the key improvement!
                   composite_key <- create_composite_key(last_name, first_initial, team_abbrev, season)
+                  
+                  # DEBUG: Log composite key for NSN players
+                  if (team_id == "154432") {
+                    cat("DEBUG NSN - Final composite key:", composite_key, "\n")
+                  }
                   
                   player_row <- data.frame(
                     Player = clean_name,
