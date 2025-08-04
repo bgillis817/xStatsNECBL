@@ -707,10 +707,9 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
         TRUE ~ "Expected Only"
       )
     ) %>%
-    # Clean up temporary columns - ONLY REMOVE COLUMNS THAT WE CREATED
-    select(-normalized_name, -Last_Name, -First_Initial, -Team_Abbrev, -Expected_Composite_Key) %>%
-    # Remove the joined columns that we've copied to new names
-    select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls")))
+    # Clean up temporary columns - Remove the ones we created plus the ones from the join
+    select(-normalized_name, -Last_Name, -First_Initial, -Team_Abbrev, -Expected_Composite_Key,
+           -any_of(c("Player", "wOBA", "wOBACON", "Team", "PA", "Batted_Balls")))
   
   # MATCHING SUMMARY
   total_records <- nrow(matched_data)
