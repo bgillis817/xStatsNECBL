@@ -670,6 +670,72 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   if (nrow(necbl_season_data) == 0) {
     cat("No NECBL data for", selected_season, "- returning expected data only\n")
     return(expected_with_keys %>%
+           select(-normalized_name, -Last_Name, -First_Initial, -Team_Abbrev, -Expected_Composite_Key) %>%
+           mutate(
+             actual_woba_final = NA_real_,
+             actual_wobacon_final = NA_real_,
+             data_source = "Expected Only"
+           ))
+  }
+  
+  # If no expected data for selected season, return empty
+  if (nrow(expected_with_keys) == 0) {
+    cat("No expected data for", selected_season, "- returning empty dataset\n")
+    return(data.frame())
+  }
+  
+  # SIMPLE EXACT JOIN ON COMPOSITE KEYS - No complex tiers!
+  joined_data <- expected_with_keys %>%
+    left_join(
+      necbl_season_data %>% 
+      select(Player_Team_Season_Key, Player, wOBA, wOBACON, Team, Team_Abbrev, PA, Batted_Balls), 
+      by = c("Expected_Composite_Key" = "Player_Team_Season_Key")
+    )
+  
+  # Check what columns we actually have after the join
+  cat("Columns after join:", paste(names(joined_data), collapse = ", "), "\n")
+  
+  matched_data <- joined_data %>%
+    mutate(
+      # Overlay actual data where available
+      actual_woba_final = wOBA,
+      actual_wobacon_final = wOBACON,
+      
+      # Data source
+      data_source = case_when(
+        !is.na(wOBA) ~ paste0("Expected + Actual (", selected_season, ")"),
+        TRUE ~ "Expected Only"
+      )
+    ) %>%
+    # Clean up temporary columns - ONLY REMOVE COLUMNS THAT WE CREATED
+    select(-normalized_name, -Last_Name, -First_Initial, -Team_Abbrev, -Expected_Composite_Key) %>%
+    # Remove the joined columns that we've copied to new names
+    select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls")))
+  
+  # MATCHING SUMMARY
+  total_records <- nrow(matched_data)
+  exact_matches <- sum(!is.na(matched_data$actual_woba_final))
+  
+  cat("\n=== SEASON-AWARE MATCHING SUMMARY ===\n")
+  cat("🎯 SEASON FOCUS:", selected_season, "\n")
+  cat("✅ EXPECTED RECORDS FOR", selected_season, ":", total_records, "(100%)\n")
+  cat("🎯 EXACT MATCHES FOUND:", exact_matches, "\n")
+  
+  return(matched_data)
+  
+  cat("Generated", nrow(expected_with_keys), "composite keys for expected data in", selected_season, "\n")
+  
+  # Show sample expected keys for verification
+  cat("Sample expected composite keys for", selected_season, ":\n")
+  sample_keys <- expected_with_keys %>% 
+    distinct(Batter, Expected_Composite_Key, BatterTeam) %>% 
+    head(3)
+  print(sample_keys)
+  
+  # If no NECBL data for selected season, return expected-only
+  if (nrow(necbl_season_data) == 0) {
+    cat("No NECBL data for", selected_season, "- returning expected data only\n")
+    return(expected_with_keys %>%
            select(-Last_Name, -First_Initial, -First_Name_Full, -Team_Abbrev, -Expected_Composite_Key) %>%
            mutate(
              actual_woba_final = NA_real_,
