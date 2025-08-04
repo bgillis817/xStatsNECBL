@@ -575,6 +575,13 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       First_Name_Full = trimws(sub(".*,\\s*", "", Batter)),
       First_Initial = toupper(substr(First_Name_Full, 1, 1)),
       
+      # SPECIAL CASE: Handle Jaydon Kea - normalize to use "J" as first initial
+      First_Initial = ifelse(
+        toupper(trimws(sub(",.*", "", Batter))) == "KEA" & 
+        grepl("^Jaydon", First_Name_Full, ignore.case = TRUE),
+        "J", First_Initial
+      ),
+      
       # Get team abbreviation from BatterTeam using enhanced mapping
       Team_Abbrev = sapply(BatterTeam, function(x) {
         team_info <- necbl_team_mapping_enhanced[[x]]
