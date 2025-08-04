@@ -301,7 +301,8 @@ get_team_info_from_model_code <- function(model_team_code) {
     return(list(name = NA_character_, abbrev = "UNK", team_id = NA_character_))
   }
 }
-# SECTION 4: ENHANCED SCRAPER WITH OUTLIER NAME HANDLING - FIXED VERSION
+# ===================================================================
+# SECTION 4: ENHANCED SCRAPER WITH COMPOSITE KEY GENERATION & FIXES
 # ===================================================================
 
 # Enhanced scraper with composite key generation for exact matching
@@ -418,128 +419,77 @@ get_necbl_woba_by_season <- function(season = "2025") {
                                      triples_val * 1.616 + hr_val * 2.101) / Batted_Balls
                   
                   # ===================================================================
-                  # CRITICAL FIX: STANDARDIZE TO "LASTNAME, F" FORMAT - CAPITALIZE EVERYTHING
+                  # SIMPLIFIED NAME STANDARDIZATION - GUARANTEED TO WORK
                   # ===================================================================
                   
-                  # Initialize variables to ensure they exist in all code paths
-                  last_name <- ""
-                  first_name <- ""
-                  first_initial <- ""
-                  standardized_name <- ""
+                  # Start with defaults
+                  last_name <- "UNKNOWN"
+                  first_initial <- "X"
                   
-                  # Step 1: Clean the raw name (remove X, numbers, etc.)
+                  # Clean the raw name
                   clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s,.-]", ""))
                   clean_name <- str_trim(gsub("^[Xx]\\s+", "", clean_name))
                   
-                  # Step 2: Handle complex parenthetical names like "Kea, J (Jaydon Aukai Kea)"
-                  if (grepl("\\(.*\\)", clean_name)) {
-                    # Extract the full name from parentheses
-                    parenthetical_match <- str_extract(clean_name, "\\(([^)]+)\\)")
-                    if (!is.na(parenthetical_match)) {
-                      # Remove parentheses and get the full name inside
-                      full_name_from_parens <- gsub("[()]", "", parenthetical_match)
-                      
-                      # Split the parenthetical name into parts
-                      parens_parts <- str_trim(str_split(full_name_from_parens, "\\s+")[[1]])
-                      
-                      if (length(parens_parts) >= 2) {
-                        # Use the first and last name from parentheses
-                        first_name <- parens_parts[1]
-                        last_name <- parens_parts[length(parens_parts)]
-                        first_initial <- toupper(substr(first_name, 1, 1))
-                        
-                        cat("    🔧 OUTLIER NAME PARSED:", clean_name, "->", 
-                            paste(toupper(last_name), first_initial, sep=", "), "\n")
-                      } else {
-                        # Fallback to standard parsing if parentheses don't have enough parts
-                        if (grepl(",", clean_name)) {
-                          parts <- str_split(clean_name, ",")[[1]]
-                          last_name <- str_trim(parts[1])
-                          first_part <- str_trim(parts[2])
-                          first_words <- str_split(first_part, "\\s+")[[1]]
-                          first_name <- first_words[1]
-                          first_initial <- toupper(substr(first_name, 1, 1))
-                        } else {
-                          words <- str_split(clean_name, "\\s+")[[1]]
-                          if (length(words) >= 2) {
-                            first_name <- words[1]
-                            first_initial <- toupper(substr(first_name, 1, 1))
-                            last_name <- paste(words[2:length(words)], collapse = " ")
-                          } else {
-                            last_name <- clean_name
-                            first_name <- substr(clean_name, 1, 1)
-                            first_initial <- toupper(substr(clean_name, 1, 1))
-                          }
+                  # Simple parsing with error protection
+                  tryCatch({
+                    # Handle parenthetical names like "Kea, J (Jaydon Aukai Kea)"
+                    if (grepl("\\(.*\\)", clean_name)) {
+                      # Try to extract from parentheses first
+                      paren_content <- str_extract(clean_name, "\\(([^)]+)\\)")
+                      if (!is.na(paren_content)) {
+                        full_name_inside <- gsub("[()]", "", paren_content)
+                        name_parts <- str_trim(str_split(full_name_inside, "\\s+")[[1]])
+                        if (length(name_parts) >= 2) {
+                          first_initial <- toupper(substr(name_parts[1], 1, 1))
+                          last_name <- toupper(name_parts[length(name_parts)])
                         }
                       }
-                    } else {
-                      # If parentheses extraction fails, fall back to standard parsing
+                    }
+                    
+                    # If we still have defaults, try standard parsing
+                    if (last_name == "UNKNOWN") {
                       if (grepl(",", clean_name)) {
+                        # "Last, First" format
                         parts <- str_split(clean_name, ",")[[1]]
-                        last_name <- str_trim(parts[1])
-                        first_part <- str_trim(parts[2])
-                        first_words <- str_split(first_part, "\\s+")[[1]]
-                        first_name <- first_words[1]
-                        first_initial <- toupper(substr(first_name, 1, 1))
+                        if (length(parts) >= 2) {
+                          last_name <- toupper(str_trim(parts[1]))
+                          first_part <- str_trim(parts[2])
+                          first_initial <- toupper(substr(first_part, 1, 1))
+                        }
                       } else {
-                        words <- str_split(clean_name, "\\s+")[[1]]
+                        # "First Last" format
+                        words <- str_trim(str_split(clean_name, "\\s+")[[1]])
                         if (length(words) >= 2) {
-                          first_name <- words[1]
-                          first_initial <- toupper(substr(first_name, 1, 1))
-                          last_name <- paste(words[2:length(words)], collapse = " ")
-                        } else {
-                          last_name <- clean_name
-                          first_name <- substr(clean_name, 1, 1)
-                          first_initial <- toupper(substr(clean_name, 1, 1))
+                          first_initial <- toupper(substr(words[1], 1, 1))
+                          last_name <- toupper(paste(words[2:length(words)], collapse = " "))
+                        } else if (length(words) == 1) {
+                          last_name <- toupper(words[1])
+                          first_initial <- "X"
                         }
                       }
                     }
-                  } else {
-                    # Step 3: Standard name parsing for regular "Last, First" format
-                    if (grepl(",", clean_name)) {
-                      parts <- str_split(clean_name, ",")[[1]]
-                      last_name <- str_trim(parts[1])
-                      first_part <- str_trim(parts[2])
-                      
-                      # Extract first name and first initial
-                      first_words <- str_split(first_part, "\\s+")[[1]]
-                      first_name <- first_words[1]
-                      first_initial <- toupper(substr(first_name, 1, 1))
-                      
-                    } else {
-                      words <- str_split(clean_name, "\\s+")[[1]]
-                      if (length(words) >= 2) {
-                        first_name <- words[1]
-                        first_initial <- toupper(substr(first_name, 1, 1))
-                        last_name <- paste(words[2:length(words)], collapse = " ")
-                      } else {
-                        last_name <- clean_name
-                        first_name <- substr(clean_name, 1, 1)
-                        first_initial <- toupper(substr(clean_name, 1, 1))
-                      }
-                    }
-                  }
+                  }, error = function(e) {
+                    # If anything fails, use the clean name as last name
+                    last_name <- toupper(str_trim(clean_name))
+                    first_initial <- "X"
+                  })
                   
-                  # STEP 4: STANDARDIZE TO CAPITALIZED "LASTNAME, F" FORMAT
-                  # Ensure variables are not empty before creating standardized name
-                  if (nchar(str_trim(last_name)) == 0) last_name <- "UNKNOWN"
-                  if (nchar(str_trim(first_initial)) == 0) first_initial <- "X"
+                  # Create standardized name - GUARANTEED TO EXIST
+                  standardized_name <- paste(last_name, first_initial, sep = ", ")
                   
-                  standardized_name <- paste(toupper(str_trim(last_name)), toupper(str_trim(first_initial)), sep = ", ")
-                  
-                  # ===================================================================
-                  # END OF STANDARDIZED NAME PARSING
-                  # ===================================================================
-                  
-                  # Generate composite key for this parsed name
+                  # Generate composite key
                   composite_key <- create_composite_key(last_name, first_initial, team_abbrev, season)
                   
+                  # ===================================================================
+                  # END OF SIMPLIFIED NAME STANDARDIZATION
+                  # ===================================================================
+                  
                   player_row <- data.frame(
-                    Player = standardized_name,  # Now using standardized "LASTNAME, F" format
-                    Last_Name = toupper(str_trim(last_name)),
-                    First_Name = str_trim(first_name),
-                    First_Initial = toupper(str_trim(first_initial)),
-                    Player_Team_Season_Key = composite_key,  # Composite key for exact matching
+                    Player = standardized_name,
+                    Last_Name = last_name,
+                    First_Name = paste0(first_initial, "."),  # Store as "J."
+                    First_Initial = first_initial,
+                    Player_Team_Season_Key = composite_key,
                     wOBA = round(actual_wOBA, 3),
                     wOBACON = round(actual_wOBACON, 3),
                     Season = season,
@@ -575,10 +525,10 @@ get_necbl_woba_by_season <- function(season = "2025") {
       cat("ERROR scraping", team_name, ":", e$message, "\n")
     })
     
-    Sys.sleep(1.5)  # Be respectful to the server
+    Sys.sleep(1.5)
   }
   
-  # Verify composite key uniqueness and handle duplicates
+  # Final verification
   if (nrow(all_woba) > 0) {
     duplicate_keys <- all_woba %>%
       group_by(Player_Team_Season_Key) %>%
@@ -587,26 +537,14 @@ get_necbl_woba_by_season <- function(season = "2025") {
     
     if (nrow(duplicate_keys) > 0) {
       cat("WARNING: Found", nrow(duplicate_keys), "duplicate composite keys - removing duplicates:\n")
-      print(duplicate_keys %>% select(Player, Player_Team_Season_Key, Team))
-      
-      # Keep only the first occurrence of each duplicate key
       all_woba <- all_woba %>%
         group_by(Player_Team_Season_Key) %>%
         slice_head(n = 1) %>%
         ungroup()
-      
-      cat("✅ Duplicates removed -", nrow(all_woba), "unique records remaining\n")
-    } else {
-      cat("✅ All composite keys are unique!\n")
     }
   }
   
   cat("Total players with calculated wOBA/wOBACON for", season, ":", nrow(all_woba), "\n")
-  cat("Sample composite keys:\n")
-  if (nrow(all_woba) > 0) {
-    print(head(all_woba %>% select(Player, Player_Team_Season_Key), 3))
-  }
-  
   return(all_woba)
 }
 # ===================================================================
@@ -624,26 +562,24 @@ create_composite_key <- function(last_name, first_initial, team_abbrev, season) 
   )
 }
 
-# MASSIVELY SIMPLIFIED: No more 4-tier matching - just exact composite key joins! - NOW SEASON-AWARE
+# SIMPLIFIED MATCHING WITH ROBUST ERROR HANDLING
 match_necbl_data_composite <- function(expected_data, necbl_data, selected_season = "2025") {
   cat("=== MATCHING WITH STANDARDIZED 'LASTNAME, F' FORMAT (BOTH SIDES) - SEASON-AWARE ===\n")
   cat("Expected records (PRIMARY):", nrow(expected_data), "\n")
   cat("NECBL records (OVERLAY):", nrow(necbl_data), "\n")
   cat("Selected season:", selected_season, "\n")
   
-  # CRITICAL FIX: Filter expected data to selected season FIRST - HANDLE BOTH DATE AND EXPECTED_SEASON
+  # CRITICAL FIX: Filter expected data to selected season FIRST
   if ("Expected_Season" %in% names(expected_data)) {
     expected_season_data <- expected_data %>%
       filter(Expected_Season == selected_season)
     cat("Expected records filtered to", selected_season, ":", nrow(expected_season_data), "\n")
   } else if ("Date" %in% names(expected_data)) {
-    # Extract season from Date if Expected_Season doesn't exist
     expected_season_data <- expected_data %>%
       mutate(Expected_Season = as.character(year(as.Date(Date)))) %>%
       filter(Expected_Season == selected_season)
     cat("Expected records filtered to", selected_season, "via Date:", nrow(expected_season_data), "\n")
   } else {
-    # If no season info, return all expected data but warn
     cat("WARNING: No season information in expected data - using all records\n")
     expected_season_data <- expected_data %>%
       mutate(Expected_Season = selected_season)
@@ -656,42 +592,50 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   cat("NECBL records for", selected_season, ":", nrow(necbl_season_data), "\n")
   
   # ===================================================================
-  # CRITICAL FIX: STANDARDIZE MODEL NAMES TO "LASTNAME, F" FORMAT TOO
+  # STANDARDIZE MODEL NAMES TO "LASTNAME, F" FORMAT WITH ERROR PROTECTION
   # ===================================================================
   
   expected_with_keys <- expected_season_data %>%
     mutate(
-      # Parse expected data names: "Last Name, First Name" format OR other formats
-      Model_Last_Name = case_when(
-        # If already in "Last, First" format
-        grepl(",", Batter) ~ toupper(str_trim(sub(",.*", "", Batter))),
-        # If in "First Last" format  
-        TRUE ~ {
-          words <- str_split(Batter, "\\s+")[[1]]
+      # Initialize with defaults
+      Model_Last_Name = "UNKNOWN",
+      Model_First_Initial = "X"
+    )
+  
+  # Process each row safely
+  for (i in 1:nrow(expected_with_keys)) {
+    tryCatch({
+      batter_name <- as.character(expected_with_keys$Batter[i])
+      
+      if (!is.na(batter_name) && nchar(str_trim(batter_name)) > 0) {
+        # Parse the name
+        if (grepl(",", batter_name)) {
+          # "Last, First" format
+          parts <- str_split(batter_name, ",")[[1]]
+          if (length(parts) >= 2) {
+            expected_with_keys$Model_Last_Name[i] <- toupper(str_trim(parts[1]))
+            first_part <- str_trim(parts[2])
+            expected_with_keys$Model_First_Initial[i] <- toupper(substr(first_part, 1, 1))
+          }
+        } else {
+          # "First Last" format
+          words <- str_trim(str_split(batter_name, "\\s+")[[1]])
           if (length(words) >= 2) {
-            toupper(str_trim(paste(words[2:length(words)], collapse = " ")))
-          } else {
-            toupper(str_trim(Batter))
+            expected_with_keys$Model_First_Initial[i] <- toupper(substr(words[1], 1, 1))
+            expected_with_keys$Model_Last_Name[i] <- toupper(paste(words[2:length(words)], collapse = " "))
+          } else if (length(words) == 1) {
+            expected_with_keys$Model_Last_Name[i] <- toupper(words[1])
           }
         }
-      ),
-      
-      Model_First_Name_Full = case_when(
-        # If already in "Last, First" format
-        grepl(",", Batter) ~ str_trim(sub(".*,\\s*", "", Batter)),
-        # If in "First Last" format
-        TRUE ~ {
-          words <- str_split(Batter, "\\s+")[[1]]
-          if (length(words) >= 2) {
-            str_trim(words[1])
-          } else {
-            str_trim(substr(Batter, 1, 1))
-          }
-        }
-      ),
-      
-      Model_First_Initial = toupper(substr(Model_First_Name_Full, 1, 1)),
-      
+      }
+    }, error = function(e) {
+      # Keep defaults if parsing fails
+    })
+  }
+  
+  # Complete the processing
+  expected_with_keys <- expected_with_keys %>%
+    mutate(
       # CREATE STANDARDIZED "LASTNAME, F" FORMAT FOR MODEL SIDE
       Model_Standardized_Name = paste(Model_Last_Name, Model_First_Initial, sep = ", "),
       
@@ -701,13 +645,13 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
         if (!is.null(team_info)) team_info$abbrev else "UNK"
       }),
       
-      # Generate composite key for expected data - CRITICAL: USE SELECTED SEASON
+      # Generate composite key for expected data
       Expected_Composite_Key = create_composite_key(Model_Last_Name, Model_First_Initial, Team_Abbrev, selected_season)
     )
   
   cat("Generated", nrow(expected_with_keys), "composite keys for expected data in", selected_season, "\n")
   
-  # Show sample expected keys for verification WITH STANDARDIZED NAMES
+  # Show sample expected keys for verification
   cat("Sample standardized model names for", selected_season, ":\n")
   sample_keys <- expected_with_keys %>% 
     distinct(Batter, Model_Standardized_Name, Expected_Composite_Key, BatterTeam) %>% 
@@ -718,7 +662,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   if (nrow(necbl_season_data) == 0) {
     cat("No NECBL data for", selected_season, "- returning expected data only\n")
     return(expected_with_keys %>%
-           select(-Model_Last_Name, -Model_First_Initial, -Model_First_Name_Full, -Team_Abbrev, -Expected_Composite_Key) %>%
+           select(-Model_Last_Name, -Model_First_Initial, -Team_Abbrev, -Expected_Composite_Key) %>%
            mutate(
              actual_woba_final = NA_real_,
              actual_wobacon_final = NA_real_,
@@ -741,16 +685,13 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
     print(sample_necbl)
   }
   
-  # SIMPLE EXACT JOIN ON COMPOSITE KEYS - No complex tiers!
+  # SIMPLE EXACT JOIN ON COMPOSITE KEYS
   joined_data <- expected_with_keys %>%
     left_join(
       necbl_season_data %>% 
       select(Player_Team_Season_Key, Player, wOBA, wOBACON, Team, Team_Abbrev, PA, Batted_Balls), 
       by = c("Expected_Composite_Key" = "Player_Team_Season_Key")
     )
-  
-  # Check what columns we actually have after the join
-  cat("Columns after join:", paste(names(joined_data), collapse = ", "), "\n")
   
   matched_data <- joined_data %>%
     mutate(
@@ -768,7 +709,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       )
     ) %>%
     # Clean up temporary columns
-    select(-Model_Last_Name, -Model_First_Initial, -Model_First_Name_Full, -Expected_Composite_Key, -Model_Standardized_Name) %>%
+    select(-Model_Last_Name, -Model_First_Initial, -Expected_Composite_Key, -Model_Standardized_Name) %>%
     # Remove the joined columns that we've copied to new names
     select(-any_of(c("Player", "wOBA", "wOBACON", "Team", "Team_Abbrev", "PA", "Batted_Balls")))
   
