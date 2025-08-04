@@ -592,7 +592,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   cat("NECBL records for", selected_season, ":", nrow(necbl_season_data), "\n")
   
   # ===================================================================
-  # STANDARDIZE MODEL NAMES TO "LASTNAME, F" FORMAT WITH ERROR PROTECTION
+  # MODEL SIDE: PERFECT "LASTNAME, F" STANDARDIZATION (MATCHING POINTSTREAK)
   # ===================================================================
   
   expected_with_keys <- expected_season_data %>%
@@ -602,7 +602,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       Model_First_Initial = "X"
     )
   
-  # Process each row safely
+  # Process each row safely to ensure perfect matching
   for (i in 1:nrow(expected_with_keys)) {
     tryCatch({
       batter_name <- as.character(expected_with_keys$Batter[i])
@@ -610,24 +610,43 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
       if (!is.na(batter_name) && nchar(str_trim(batter_name)) > 0) {
         # Parse the name
         if (grepl(",", batter_name)) {
-          # "Last, First" format
+          # "Last, First" format (like "Kea, Jaydon")
           parts <- str_split(batter_name, ",")[[1]]
           if (length(parts) >= 2) {
+            # CRITICAL: Extract exactly what Pointstreak does
             expected_with_keys$Model_Last_Name[i] <- toupper(str_trim(parts[1]))
             first_part <- str_trim(parts[2])
+            # CRITICAL: Take ONLY first letter, uppercase, exactly like Pointstreak
             expected_with_keys$Model_First_Initial[i] <- toupper(substr(first_part, 1, 1))
           }
         } else {
-          # "First Last" format
+          # "First Last" format (like "Jaydon Kea")
           words <- str_trim(str_split(batter_name, "\\s+")[[1]])
           if (length(words) >= 2) {
+            # CRITICAL: Take ONLY first letter, uppercase, exactly like Pointstreak
             expected_with_keys$Model_First_Initial[i] <- toupper(substr(words[1], 1, 1))
             expected_with_keys$Model_Last_Name[i] <- toupper(paste(words[2:length(words)], collapse = " "))
           } else if (length(words) == 1) {
             expected_with_keys$Model_Last_Name[i] <- toupper(words[1])
+            expected_with_keys$Model_First_Initial[i] <- "X"
           }
         }
       }
+      
+      # CRITICAL: Double-check first initial is exactly one character
+      current_initial <- expected_with_keys$Model_First_Initial[i]
+      expected_with_keys$Model_First_Initial[i] <- toupper(substr(str_trim(current_initial), 1, 1))
+      if (nchar(expected_with_keys$Model_First_Initial[i]) == 0) {
+        expected_with_keys$Model_First_Initial[i] <- "X"
+      }
+      
+      # CRITICAL: Double-check last name is uppercase and trimmed
+      current_last <- expected_with_keys$Model_Last_Name[i]
+      expected_with_keys$Model_Last_Name[i] <- toupper(str_trim(current_last))
+      if (nchar(expected_with_keys$Model_Last_Name[i]) == 0) {
+        expected_with_keys$Model_Last_Name[i] <- "UNKNOWN"
+      }
+      
     }, error = function(e) {
       # Keep defaults if parsing fails
     })
@@ -636,7 +655,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   # Complete the processing
   expected_with_keys <- expected_with_keys %>%
     mutate(
-      # CREATE STANDARDIZED "LASTNAME, F" FORMAT FOR MODEL SIDE
+      # CREATE IDENTICAL "LASTNAME, F" FORMAT AS POINTSTREAK
       Model_Standardized_Name = paste(Model_Last_Name, Model_First_Initial, sep = ", "),
       
       # Get team abbreviation from BatterTeam using enhanced mapping
@@ -645,7 +664,7 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
         if (!is.null(team_info)) team_info$abbrev else "UNK"
       }),
       
-      # Generate composite key for expected data
+      # Generate composite key using IDENTICAL components as Pointstreak
       Expected_Composite_Key = create_composite_key(Model_Last_Name, Model_First_Initial, Team_Abbrev, selected_season)
     )
   
