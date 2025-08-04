@@ -425,9 +425,25 @@ get_necbl_woba_by_season <- function(season = "2025") {
                   # Remove leading "X " or "x " that appears in some NECBL data
                   clean_name <- str_trim(gsub("^[Xx]\\s+", "", clean_name))
                   
-                  # SPECIAL CASE: Handle "Jaydon Aukai Kea" -> "Kea, Jaydon"
-                  if (grepl("Jaydon Aukai Kea", clean_name, ignore.case = TRUE)) {
-                    clean_name <- "Kea, Jaydon"
+                  # DEBUG: Log the original and cleaned name for Kea
+                  if (grepl("Kea", clean_name, ignore.case = TRUE)) {
+                    cat("DEBUG - Original player_raw:", player_raw, "\n")
+                    cat("DEBUG - Cleaned name:", clean_name, "\n")
+                  }
+                  
+                  # SPECIAL CASE: Handle any Kea name variations
+                  if (grepl("Kea", clean_name, ignore.case = TRUE)) {
+                    # If it contains "Jaydon Aukai Kea" or similar, normalize to "Kea, J"
+                    if (grepl("Jaydon.*Kea", clean_name, ignore.case = TRUE) || 
+                        grepl("Aukai.*Kea", clean_name, ignore.case = TRUE)) {
+                      clean_name <- "Kea, J"
+                      cat("DEBUG - Normalized Kea name to:", clean_name, "\n")
+                    }
+                    # If it's already "Kea, J" format, keep it
+                    else if (grepl("Kea,\\s*J", clean_name, ignore.case = TRUE)) {
+                      clean_name <- "Kea, J"
+                      cat("DEBUG - Kept Kea name as:", clean_name, "\n")
+                    }
                   }
                   
                   # Parse name more carefully
