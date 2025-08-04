@@ -608,17 +608,12 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   # Generate composite keys for expected data - USING THE SELECTED SEASON
   expected_with_keys <- expected_season_data %>%
     mutate(
-      # Parse expected data names: "Last Name, First Name" format
-      Last_Name = toupper(trimws(sub(",.*", "", Batter))),
-      First_Name_Full = trimws(sub(".*,\\s*", "", Batter)),
-      First_Initial = toupper(substr(First_Name_Full, 1, 1)),
+      # ROBUST NAME NORMALIZATION: Convert to LASTNAME, F format
+      normalized_name = sapply(Batter, normalize_player_name),
       
-      # SPECIAL CASE: Handle Jaydon Kea - normalize to use "J" as first initial
-      First_Initial = ifelse(
-        toupper(trimws(sub(",.*", "", Batter))) == "KEA" & 
-        grepl("^Jaydon", First_Name_Full, ignore.case = TRUE),
-        "J", First_Initial
-      ),
+      # Parse normalized name (now in "LASTNAME, F" format)
+      Last_Name = toupper(trimws(sub(",.*", "", normalized_name))),
+      First_Initial = toupper(trimws(sub(".*,\\s*", "", normalized_name))),
       
       # Get team abbreviation from BatterTeam using enhanced mapping
       Team_Abbrev = sapply(BatterTeam, function(x) {
