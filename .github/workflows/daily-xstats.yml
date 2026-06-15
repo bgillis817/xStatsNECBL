@@ -1,0 +1,51 @@
+name: Daily xStatsNECBL Refresh
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+
+      - name: Cache R packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}
+          restore-keys: |
+            ${{ runner.os }}-r-
+
+      - name: Install R dependencies
+        run: |
+          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive"), repos="https://cloud.r-project.org")'
+
+      - name: Write Google service account key
+        run: echo '${{ secrets.GDRIVE_SA_KEY }}' > service_account.json
+
+      - name: Run daily pipeline
+        env:
+          GDRIVE_SA_PATH: service_account.json
+          GDRIVE_FOLDER_ID: "1haJdctNyLTx81GXlvCdBRDSWKrDAlKAw"
+        run: Rscript pipeline_daily.R
+
+      - name: Clean up service account key
+        if: always()
+        run: rm -f service_account.json
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add navs_all_data.rds xwoba_clean_data.rds
+          git diff --cached --quiet || git commit -m "Daily xStats data refresh ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git push
