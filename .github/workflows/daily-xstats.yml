@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v2
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v3
           restore-keys: |
             ${{ runner.os }}-r-
 
@@ -45,6 +45,7 @@ jobs:
         env:
           GDRIVE_SA_PATH: service_account.json
           GDRIVE_FOLDER_ID: "1haJdctNyLTx81GXlvCdBRDSWKrDAlKAw"
+          LIVE_RDS_FILE_ID: "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
         run: Rscript pipeline_daily.R
 
       - name: Clean up service account key
@@ -52,14 +53,22 @@ jobs:
         run: rm -f service_account.json
 
       - name: Commit and push updated data
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add navs_all_data.rds xwoba_clean_data.rds
-          git diff --cached --quiet || git commit -m "Daily xStats data refresh ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          git push
+          git add navs_all_data.rds xwoba_clean_data.rds file_manifest.rds
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No data changes to commit."
+          else
+            git commit -m "Daily xStats data refresh ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Deploy to shinyapps.io
+        if: steps.commit.outputs.changed == 'true'
         env:
           SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
           SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
