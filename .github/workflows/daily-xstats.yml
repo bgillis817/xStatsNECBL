@@ -63,6 +63,8 @@ jobs:
             echo "No data changes to commit."
           else
             git commit -m "Daily xStats data refresh ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git fetch origin main
+            git rebase origin/main || (git rebase --abort && git merge -X ours origin/main -m "Merge remote changes")
             git push
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
