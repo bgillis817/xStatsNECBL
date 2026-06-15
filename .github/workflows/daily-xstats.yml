@@ -48,10 +48,6 @@ jobs:
           LIVE_RDS_FILE_ID: "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
         run: Rscript pipeline_daily.R
 
-      - name: Clean up service account key
-        if: always()
-        run: rm -f service_account.json
-
       - name: Commit and push updated data
         id: commit
         run: |
@@ -70,7 +66,6 @@ jobs:
           fi
 
       - name: Deploy to shinyapps.io
-        if: steps.commit.outputs.changed == 'true'
         env:
           SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
           SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
@@ -88,3 +83,7 @@ jobs:
               forceUpdate = TRUE
             )
           '
+
+      - name: Clean up service account key
+        if: always()
+        run: rm -f service_account.json
