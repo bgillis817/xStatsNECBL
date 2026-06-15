@@ -8,9 +8,12 @@ suppressPackageStartupMessages({
   )
 })
 
-# Set up Google Drive authentication
-options(gargle_oauth_cache = ".secrets")
-drive_auth(cache = ".secrets", email = TRUE)
+# Authenticate to Google Drive using a service account (non-interactive)
+if (file.exists("service_account.json")) {
+  googledrive::drive_auth(path = "service_account.json")
+} else {
+  googledrive::drive_deauth()
+}
 
 # ===================================================================
 # PHASE 1: CSV COMBINATION
@@ -548,9 +551,12 @@ library(dplyr)
 library(caret)
 library(xgboost)
 
-# Set up Google Drive authentication
-options(gargle_oauth_cache = ".secrets")
-drive_auth(cache = ".secrets", email = TRUE)
+# Authenticate to Google Drive using a service account (non-interactive)
+if (file.exists("service_account.json")) {
+  googledrive::drive_auth(path = "service_account.json")
+} else {
+  googledrive::drive_deauth()
+}
 
 
 combine_navs_csvs <- function(folder_path = "Navs CSVs", use_google_drive = TRUE) {
@@ -796,7 +802,15 @@ library(xgboost)
 library(dplyr)
 
 # Load data
-raw_data <- readRDS(url("https://drive.google.com/uc?export=download&id=1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"))
+live_rds_id <- "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
+if (file.exists("service_account.json")) {
+  tmp_rds <- tempfile(fileext = ".rds")
+  googledrive::drive_download(googledrive::as_id(live_rds_id), path = tmp_rds, overwrite = TRUE)
+  raw_data <- readRDS(tmp_rds)
+  unlink(tmp_rds)
+} else {
+  raw_data <- readRDS(url(paste0("https://drive.google.com/uc?export=download&id=", live_rds_id)))
+}
 
 # Feature Engineering Function
 create_ultimate_features <- function(raw_data) {
@@ -3196,5 +3210,3 @@ assign("test_composite_key_system", test_composite_key_system, envir = .GlobalEn
 assign("print_usage_instructions", print_usage_instructions, envir = .GlobalEnv)
 
 assign("quick_composite_test", quick_composite_test, envir = .GlobalEnv)
-
-
