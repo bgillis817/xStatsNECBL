@@ -1,27 +1,42 @@
 """
-NECBL Hitting Stats Scraper
-Uses the PrestoSports static monospace print template which returns
-plain HTML with no JavaScript required.
-URL: https://newenglandcollegiateleague.prestosports.com/sports/bsb/YEAR/teams/SLUG
-     ?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h
+NECBL Hitting Stats Scraper + Auto-Upload to Google Drive
+Scrapes all 13 NECBL teams, calculates wOBA/wOBACON, uploads to Drive.
+
+Setup (once):
+  pip install requests beautifulsoup4 pandas google-auth google-api-python-client
+
+Run:
+  python scrape_necbl_local.py
+
+Schedule daily via Windows Task Scheduler or Mac/Linux cron.
+
+Requirements:
+  - service_account.json in the same folder as this script
+  - NECBL_STATS_FOLDER_ID set below
 """
 
 import re
 import sys
+import os
 import time
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
 
+# ============================================================
+#  CONFIGURATION — edit these two values
+# ============================================================
+SERVICE_ACCOUNT_JSON = r"C:\Users\bengi\OneDrive\NECBLScraper\service_account.json"
+NECBL_STATS_FOLDER_ID = "1UFkClomCviloJrq4X7cUGeNVMCy7ENQb"
+# ============================================================
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
+    )
 }
 
 BASE = "https://newenglandcollegiateleague.prestosports.com"
@@ -50,6 +65,7 @@ WOBA_WEIGHTS = {
     "bb_hbp": 0.690,
 }
 
+
 def safe_num(val, default=0):
     try:
         v = re.sub(r"[^0-9.]", "", str(val).strip())
@@ -63,15 +79,15 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
         f"{BASE}/sports/bsb/{season}/teams/{slug}"
         f"?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h"
     )
-    print(f"  Scraping {team_name} ({season})...", flush=True)
+    print(f"  {team_name} ({season})...", flush=True, end=" ")
 
     try:
         resp = session.get(url, headers=HEADERS, timeout=20)
         if resp.status_code != 200:
-            print(f"    HTTP {resp.status_code} - skipping", flush=True)
+            print(f"HTTP {resp.status_code} - skipped")
             return []
     except Exception as e:
-        print(f"    Request error: {e}", flush=True)
+        print(f"Error: {e}")
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -79,20 +95,20 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
 
     hitting_tbl = None
     for tbl in tables:
-        headers = [th.get_text(strip=True).upper() for th in tbl.find_all("th")]
-        if "AB (AT BATS)" in headers or "AB" in headers:
+        hdrs = [th.get_text(strip=True).upper() for th in tbl.find_all("th")]
+        if "AB (AT BATS)" in hdrs or "AB" in hdrs:
             hitting_tbl = tbl
             break
 
     if hitting_tbl is None:
-        print(f"    No hitting table found", flush=True)
+        print("no stats table")
         return []
 
-    headers = [th.get_text(strip=True).upper() for th in hitting_tbl.find_all("th")]
+    hdrs = [th.get_text(strip=True).upper() for th in hitting_tbl.find_all("th")]
 
     def col(name, *alts):
         for n in [name] + list(alts):
-            for i, h in enumerate(headers):
+            for i, h in enumerate(hdrs):
                 if h == n or h.startswith(n):
                     return i
         return None
@@ -108,10 +124,10 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
     so_col   = col("SO", "K")
 
     if name_col is None or ab_col is None or h_col is None:
-        print(f"    Missing columns. Headers: {headers[:10]}", flush=True)
+        print("missing columns")
         return []
 
-    rows = hitting_tbl.find_all("tr")[1:]  # skip header
+    rows = hitting_tbl.find_all("tr")[1:]
     players = []
 
     for row in rows:
@@ -124,10 +140,7 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
                 return ""
             return cells[idx].get_text(strip=True)
 
-        raw_name = cell(name_col)
-        # Strip trailing dots used for monospace padding
-        raw_name = re.sub(r"\.+$", "", raw_name).strip()
-
+        raw_name = re.sub(r"\.+$", "", cell(name_col)).strip()
         if not raw_name or len(raw_name) < 2:
             continue
         if re.match(r"^(Total|Opponent|Name|Player|---|#)", raw_name, re.I):
@@ -148,7 +161,6 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
         singles = max(0, h_val - d_val - t_val - hr_val)
         pa      = ab_val + bb_val + hbp_val
         bip     = max(1, ab_val - so_val)
-
         if pa <= 0:
             continue
 
@@ -167,7 +179,6 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
             hr_val  * WOBA_WEIGHTS["hr"]
         ) / bip
 
-        # PrestoSports monospace template: "First Last......."
         clean = re.sub(r"\s+", " ", raw_name).strip()
         parts = clean.split()
         if len(parts) >= 2:
@@ -205,40 +216,99 @@ def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
             "Player_Team_Season_Key":  composite_key,
         })
 
-    print(f"    Got {len(players)} players", flush=True)
+    print(f"{len(players)} players")
     return players
+
+
+def upload_to_drive(csv_path, folder_id, sa_json):
+    """Upload necbl_stats.csv to Google Drive, replacing any existing file."""
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+
+    print("\nUploading to Google Drive...", flush=True)
+
+    creds = service_account.Credentials.from_service_account_file(
+        sa_json,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    service = build("drive", "v3", credentials=creds)
+
+    # Check if file already exists in folder
+    query = (
+        f"name = 'necbl_stats.csv' "
+        f"and '{folder_id}' in parents "
+        f"and trashed = false"
+    )
+    existing = service.files().list(q=query, fields="files(id, name)").execute()
+    existing_files = existing.get("files", [])
+
+    media = MediaFileUpload(csv_path, mimetype="text/csv", resumable=True)
+
+    if existing_files:
+        # Update existing file (service account has permission, no quota needed)
+        file_id = existing_files[0]["id"]
+        service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+        print(f"  Updated necbl_stats.csv (id: {file_id})")
+    else:
+        print("  No existing necbl_stats.csv found in Drive folder.")
+        print("  Please upload necbl_stats.csv to the NECBL Stats folder manually once.")
+        print(f"  File is saved locally at: {csv_path}")
+
+    print("  Upload complete.")
 
 
 def main():
     current_year = str(datetime.now().year)
     seasons = [str(y) for y in range(int(current_year), 2020, -1)]
-    print(f"Scraping NECBL seasons: {seasons}", flush=True)
+
+    print("=" * 60)
+    print("NECBL Stats Scraper")
+    print(f"Scraping seasons: {seasons}")
+    print("=" * 60)
 
     all_rows = []
     session = requests.Session()
 
     for season in seasons:
-        print(f"\n=== Season {season} ===", flush=True)
+        print(f"\n--- Season {season} ---")
         for code, (name, abbrev, slug) in TEAM_SLUGS.items():
             rows = scrape_team(session, season, code, name, abbrev, slug)
             all_rows.extend(rows)
-            time.sleep(0.5)
+            time.sleep(1.5)
 
-    if all_rows:
-        df = pd.DataFrame(all_rows)
-        df.to_csv("necbl_stats.csv", index=False)
-        print(f"\nSaved necbl_stats.csv with {len(df)} rows", flush=True)
-        print(f"Seasons: {sorted(df['Season'].unique().tolist(), reverse=True)}", flush=True)
-        print(f"Teams:   {df['Team_Code'].nunique()} teams", flush=True)
-    else:
-        pd.DataFrame(columns=[
-            "Player","Last_Name","First_Initial","Team","Team_Code",
-            "Team_Abbrev","Season","AB","H","Singles","Doubles","Triples",
-            "HR","BB","HBP","SO","PA","Batted_Balls","wOBA","wOBACON",
-            "Player_Team_Season_Key"
-        ]).to_csv("necbl_stats.csv", index=False)
-        print("No data scraped - wrote empty necbl_stats.csv", flush=True)
+    print("\n" + "=" * 60)
+
+    if not all_rows:
+        print("No data scraped — check your internet connection.")
         sys.exit(1)
+
+    df = pd.DataFrame(all_rows)
+    csv_path = os.path.join(os.path.dirname(__file__), "necbl_stats.csv")
+    df.to_csv(csv_path, index=False)
+
+    print(f"Saved {csv_path}")
+    print(f"  Total rows:  {len(df)}")
+    print(f"  Seasons:     {sorted(df['Season'].unique().tolist(), reverse=True)}")
+    print(f"  Teams:       {df['Team_Code'].nunique()} / 13")
+
+    # Upload to Drive
+    if not NECBL_STATS_FOLDER_ID or "REPLACE" in NECBL_STATS_FOLDER_ID:
+        print("\nSkipping Drive upload — set NECBL_STATS_FOLDER_ID in the script first.")
+        return
+
+    if not os.path.exists(SERVICE_ACCOUNT_JSON):
+        print(f"\nSkipping Drive upload — {SERVICE_ACCOUNT_JSON} not found.")
+        return
+
+    try:
+        upload_to_drive(csv_path, NECBL_STATS_FOLDER_ID, SERVICE_ACCOUNT_JSON)
+    except Exception as e:
+        print(f"Drive upload failed: {e}")
+        print("CSV saved locally — upload manually if needed.")
 
 
 if __name__ == "__main__":
