@@ -48,12 +48,19 @@ def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
 
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        # Wait for table with hitting data
+        # Wait for the hitting stats table - look for a th containing AB
         try:
-            page.wait_for_selector("table", timeout=30000)
+            page.wait_for_selector("th:has-text('AB')", timeout=30000)
         except PlaywrightTimeout:
-            pass  # Try parsing anyway
-        time.sleep(3)
+            # Try scrolling to trigger lazy load
+            try:
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2)
+                page.wait_for_selector("th:has-text('AB')", timeout=15000)
+            except PlaywrightTimeout:
+                print(f"    No AB column found after scroll for {team_name}", flush=True)
+                return []
+        time.sleep(1)
     except PlaywrightTimeout:
         print(f"    Timeout for {team_name}", flush=True)
         return []
