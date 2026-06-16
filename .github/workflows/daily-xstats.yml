@@ -26,13 +26,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v6
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v7
           restore-keys: |
             ${{ runner.os }}-r-
 
-      - name: Install R dependencies (pipeline + model)
+      - name: Install R dependencies (pipeline + model + scraper)
         run: |
-          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret"), repos="https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret","httr","rvest","xml2"), repos="https://cloud.r-project.org")'
 
       - name: Install R dependencies (app + deploy)
         run: |
@@ -52,7 +52,7 @@ jobs:
         run: |
           git fetch origin main
           git checkout origin/main -- app.R pipeline_functions.R pipeline_daily.R
-          echo "Pulled latest app.R and pipeline files from main"
+          echo "Pulled latest files from main"
 
       - name: Commit and push updated data
         id: commit
