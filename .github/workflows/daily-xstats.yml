@@ -12,6 +12,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install selenium beautifulsoup4 pandas
+
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Scrape NECBL stats (Selenium)
+        run: python scrape_necbl.py
+
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
         with:
@@ -26,13 +41,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v9
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v10
           restore-keys: |
             ${{ runner.os }}-r-
 
-      - name: Install R dependencies (pipeline + model + scraper)
+      - name: Install R dependencies (pipeline + model)
         run: |
-          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret","httr","rvest","xml2"), repos="https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret"), repos="https://cloud.r-project.org")'
 
       - name: Install R dependencies (app + deploy)
         run: |
@@ -41,7 +56,7 @@ jobs:
       - name: Write Google service account key
         run: echo '${{ secrets.GDRIVE_SA_KEY }}' > service_account.json
 
-      - name: Run daily pipeline
+      - name: Run R pipeline
         env:
           GDRIVE_SA_PATH: service_account.json
           GDRIVE_FOLDER_ID: "1haJdctNyLTx81GXlvCdBRDSWKrDAlKAw"
