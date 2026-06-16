@@ -2646,3 +2646,6 @@ assign("test_composite_key_system", test_composite_key_system, envir = .GlobalEn
 assign("print_usage_instructions", print_usage_instructions, envir = .GlobalEnv)
 
 assign("quick_composite_test", quick_composite_test, envir = .GlobalEnv)
+
+# Return shinyApp object for shinyapps.io
+shinyApp(ui = ui, server = server)
