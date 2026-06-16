@@ -48,12 +48,18 @@ jobs:
           LIVE_RDS_FILE_ID: "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
         run: Rscript pipeline_daily.R
 
+      - name: Pull latest repo changes before deploy
+        run: |
+          git fetch origin main
+          git checkout origin/main -- app.R pipeline_functions.R pipeline_daily.R
+          echo "Pulled latest app.R and pipeline files from main"
+
       - name: Commit and push updated data
         id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add navs_all_data.rds xwoba_clean_data.rds file_manifest.rds xwoba_model.rds
+          git add navs_all_data.rds xwoba_clean_data.rds file_manifest.rds xwoba_model.rds 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No data changes to commit."
