@@ -1235,16 +1235,28 @@ calculate_full_xwoba <- function(raw_data, model_results) {
 }
 
 # Run the complete model
-ultimate_results <- train_maximum_correlation_xwoba(raw_data)
-full_xwoba_result <- calculate_full_xwoba(raw_data, ultimate_results)
+# Load pre-trained model results from pipeline (avoids retraining on startup)
+if (file.exists("xwoba_model.rds")) {
+  cat("\nLoading pre-trained xwOBA model from xwoba_model.rds...\n")
+  model_cache <- readRDS("xwoba_model.rds")
+  ultimate_results   <- model_cache$ultimate_results
+  full_xwoba_result  <- model_cache$full_xwoba_result
+} else {
+  cat("\nNo cached model found - training now (this will take a moment)...\n")
+  ultimate_results   <- train_maximum_correlation_xwoba(raw_data)
+  full_xwoba_result  <- calculate_full_xwoba(raw_data, ultimate_results)
+  saveRDS(list(ultimate_results = ultimate_results,
+               full_xwoba_result = full_xwoba_result),
+          "xwoba_model.rds")
+}
 
 # Get key results
 mean_xwobacon <- mean(ultimate_results$predictions, na.rm = TRUE)
-correlation <- ultimate_results$correlation
+correlation   <- ultimate_results$correlation
 
 cat("\nFinal Results:\n")
 cat("Mean xwOBAcon:", round(mean_xwobacon, 3), "\n")
-cat("Full xwOBA:", round(full_xwoba_result, 3), "\n") 
+cat("Full xwOBA:", round(full_xwoba_result, 3), "\n")
 cat("Correlation:", round(correlation, 4), "\n")
 
 
