@@ -18,18 +18,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: |
-          pip install selenium webdriver-manager beautifulsoup4 pandas
+        run: pip install playwright beautifulsoup4 pandas
 
-      - name: Install Chrome
-        run: |
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
-          google-chrome --version
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
 
-      - name: Scrape NECBL stats (Selenium)
+      - name: Scrape NECBL stats (Playwright)
         run: python scrape_necbl.py
 
       - name: Setup R
@@ -46,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v10
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v11
           restore-keys: |
             ${{ runner.os }}-r-
 
