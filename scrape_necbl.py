@@ -10,6 +10,7 @@ import re
 import sys
 import pandas as pd
 from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -43,16 +44,29 @@ WOBA_WEIGHTS = {
 
 def make_driver():
     opts = Options()
-    opts.add_argument("--headless")
+    opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-extensions")
+    opts.add_argument("--disable-software-rasterizer")
+    opts.add_argument("--disable-background-networking")
+    opts.add_argument("--disable-default-apps")
+    opts.add_argument("--disable-sync")
+    opts.add_argument("--metrics-recording-only")
+    opts.add_argument("--mute-audio")
+    opts.add_argument("--no-first-run")
+    opts.add_argument("--safebrowsing-disable-auto-update")
     opts.add_argument("--window-size=1920,1080")
+    opts.add_argument("--memory-pressure-off")
     opts.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
-    return webdriver.Chrome(options=opts)
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.chrome.service import Service
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service, options=opts)
 
 
 def safe_num(val, default=0):
@@ -73,13 +87,23 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
     try:
         driver.get(url)
         # Wait up to 20s for the hitting table to appear
-        WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.TAG_NAME, "table"))
         )
-        time.sleep(2)  # Extra wait for JS data population
+        time.sleep(3)  # Extra wait for JS data population
     except Exception as e:
         print(f"    Timeout/error loading {team_name}: {e}", flush=True)
-        return []
+        # Retry once
+        try:
+            print(f"    Retrying {team_name}...", flush=True)
+            driver.get(url)
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.TAG_NAME, "table"))
+            )
+            time.sleep(3)
+        except Exception as e2:
+            print(f"    Retry failed: {e2}", flush=True)
+            return []
 
     soup = BeautifulSoup(driver.page_source, "html.parser")
     tables = soup.find_all("table")
@@ -222,19 +246,25 @@ def main():
 
     print(f"Scraping NECBL seasons: {seasons}", flush=True)
 
-    driver = make_driver()
+
     all_rows = []
 
-    try:
-        for season in seasons:
-            print(f"\n=== Season {season} ===", flush=True)
-            for code, (name, abbrev, slug) in TEAM_SLUGS.items():
+    for season in seasons:
+        print(f"\n=== Season {season} ===", flush=True)
+        for code, (name, abbrev, slug) in TEAM_SLUGS.items():
+            # Fresh driver per team - prevents one crash cascading to others
+            driver = make_driver()
+            try:
                 rows = scrape_team(driver, season, code, name, abbrev, slug)
                 all_rows.extend(rows)
-                time.sleep(0.5)
-    finally:
-        driver.quit()
-
+            except Exception as e:
+                print(f"    Driver-level error for {name}: {e}", flush=True)
+            finally:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            time.sleep(1)
     if all_rows:
         df = pd.DataFrame(all_rows)
         df.to_csv("necbl_stats.csv", index=False)
