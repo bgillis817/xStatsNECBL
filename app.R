@@ -772,36 +772,10 @@ run_complete_pipeline <- function() {
 }
 
 # ===================================================================
-# EXECUTE PIPELINE
+# ===================================================================
+# LOAD DATA FROM GOOGLE DRIVE (service account auth, no pipeline at startup)
 # ===================================================================
 
-# Run the complete pipeline
-cat("Starting Navs CSV Pipeline...\n")
-pipeline_results <- run_complete_pipeline()
-
-# Check if successful
-if (!is.null(pipeline_results)) {
-  cat("\n Pipeline completed successfully!\n")
-  cat(" Data available as 'raw_data' with", nrow(raw_data), "rows\n")
-  
-  # Now you can run any of your models:
-  cat("\nExample next steps:\n")
-  cat("# Run your ultimate model:\n")
-  cat("ultimate_results <- train_ultimate_performance_xwoba(raw_data)\n")
-  cat("\n# Or run the advanced polynomial model:\n")
-  cat("advanced_results <- train_advanced_polynomial_xwoba(raw_data)\n")
-  cat("\n# Search for a player:\n")
-  cat("player_results <- search_player_advanced(ultimate_results, raw_data, 'PlayerName')\n")
-  
-} else {
-  cat("\nPipeline failed - check Google Drive authentication and folder access\n")
-}
-# Load required libraries
-library(caret)
-library(xgboost)
-library(dplyr)
-
-# Load data
 live_rds_id <- "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
 if (file.exists("service_account.json")) {
   tmp_rds <- tempfile(fileext = ".rds")
@@ -812,7 +786,6 @@ if (file.exists("service_account.json")) {
   raw_data <- readRDS(url(paste0("https://drive.google.com/uc?export=download&id=", live_rds_id)))
 }
 
-# Feature Engineering Function
 # Model functions sourced from pipeline_functions.R
 source("pipeline_functions.R")
 
