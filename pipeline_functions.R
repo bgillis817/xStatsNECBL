@@ -987,9 +987,13 @@ get_necbl_woba_by_season <- function(season = "2026") {
       names(hitting_tbl) <- toupper(trimws(names(hitting_tbl)))
 
       get_col <- function(df, ...) {
-        nms <- toupper(names(df))
+        nms <- toupper(trimws(names(df)))
         for (nm in c(...)) {
+          # Exact match first
           idx <- which(nms == nm)
+          if (length(idx) > 0) return(idx[1])
+          # Prefix match (e.g. "2B" matches "2B (DOUBLES)")
+          idx <- which(startsWith(nms, nm))
           if (length(idx) > 0) return(idx[1])
         }
         NA_integer_
