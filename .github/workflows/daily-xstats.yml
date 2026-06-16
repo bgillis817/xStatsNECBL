@@ -18,12 +18,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install playwright beautifulsoup4 pandas
+        run: pip install requests beautifulsoup4 pandas
 
-      - name: Install Playwright browsers
-        run: playwright install chromium --with-deps
-
-      - name: Scrape NECBL stats (Playwright)
+      - name: Scrape NECBL stats
         run: python scrape_necbl.py
 
       - name: Setup R
@@ -40,7 +37,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v11
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v12
           restore-keys: |
             ${{ runner.os }}-r-
 
