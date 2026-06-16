@@ -789,6 +789,157 @@ if (file.exists("service_account.json")) {
 # Model functions sourced from pipeline_functions.R
 source("pipeline_functions.R")
 
+# Ensure calculate_expected_xwoba_and_full is available
+# (defined here directly in case pipeline_functions.R version is missing)
+calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
+  
+  # CRITICAL FIX: Add season extraction BEFORE any processing
+  if ("Date" %in% names(raw_data)) {
+    raw_data <- raw_data %>%
+      mutate(
+        Expected_Season = as.character(year(as.Date(Date)))
+      )
+    cat("Season extraction complete. Seasons found:", paste(unique(raw_data$Expected_Season), collapse = ", "), "\n")
+  } else {
+    # If no Date column, assume current year or add a default
+    raw_data <- raw_data %>%
+      mutate(Expected_Season = "2025")
+    cat("No Date column found - using default season 2025\n")
+  }
+  
+  # Step 1: Filter to batted balls with complete data
+  batted_balls <- raw_data %>%
+    filter(
+      PlayResult %in% c("Single", "Double", "Triple", "HomeRun", "Out",
+                        "FieldersChoice", "Error", "Sacrifice") &
+        !is.na(ExitSpeed) & ExitSpeed > 0 &
+        !is.na(Angle) & !is.na(Batter)
+    )
+  
+  cat("Batted balls with tracking data:", nrow(batted_balls), "\n")
+  
+  # Outcome classification for batted balls
+  batted_balls$outcome <- case_when(
+    batted_balls$PlayResult %in% c("Single") ~ "single",
+    batted_balls$PlayResult %in% c("Double") ~ "double", 
+    batted_balls$PlayResult %in% c("Triple") ~ "triple",
+    batted_balls$PlayResult %in% c("HomeRun") ~ "home_run",
+    batted_balls$PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice") ~ "out",
+    TRUE ~ "other"
+  )
+  
+  batted_balls <- batted_balls[batted_balls$outcome != "other", ]
+  
+  # wOBA weights
+  woba_weights_vector <- c(0.000, 0.888, 1.271, 1.616, 2.101)
+  
+  # Get expected predictions for batted balls
+  if (!is.null(xgb_expected) && exists("dtest")) {
+    test_probs <- predict(xgb_expected, dtest, reshape = TRUE)
+    colnames(test_probs) <- c("P_out", "P_single", "P_double", "P_triple", "P_home_run")
+    predicted_xwobacon <- as.vector(test_probs %*% woba_weights_vector)
+    batted_balls$predicted_xwobacon <- predicted_xwobacon
+  } else {
+    # Fallback calculation if expected objects not available
+    batted_balls$predicted_xwobacon <- pmin(2.5, pmax(0, 
+                                                      0.1 + (batted_balls$ExitSpeed - 60) * 0.01 + 
+                                                        pmax(0, 30 - abs(batted_balls$Angle - 20)) * 0.005
+    ))
+  }
+  
+  cat("xwOBACON calculated for", nrow(batted_balls), "batted balls\n")
+  
+  # Step 2: Get ALL plate appearances for each player BY SEASON
+  all_pa <- raw_data %>% 
+    filter(!is.na(Batter)) %>%
+    mutate(
+      pa_outcome = case_when(
+        PlayResult %in% c("Single", "Double", "Triple", "HomeRun") ~ "hit",
+        PlayResult %in% c("Out", "FieldersChoice", "Error") ~ "out", 
+        PlayResult %in% c("Sacrifice") ~ "sacrifice_fly",
+        KorBB == "Walk" ~ "walk",
+        KorBB == "IntentionalWalk" ~ "intentional_walk",
+        PitchCall == "HitByPitch" ~ "hit_by_pitch",
+        KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging") ~ "strikeout",
+        TRUE ~ "other"
+      )
+    ) %>%
+    filter(pa_outcome != "other")
+  
+  cat("Total plate appearances:", nrow(all_pa), "\n")
+  
+  # Step 3: Calculate player-level xwOBA BY SEASON (critical fix)
+  player_xwoba_full <- all_pa %>%
+    left_join(
+      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon, Expected_Season),
+      by = c("Batter", "Date", "Inning", "PAofInning")
+    ) %>%
+    # CRITICAL FIX: Use Expected_Season.x (from all_pa) for grouping
+    mutate(
+      Expected_Season = coalesce(Expected_Season.x, Expected_Season.y)
+    ) %>%
+    group_by(Batter, Expected_Season) %>%  # GROUP BY SEASON TOO!
+    summarise(
+      hits = sum(pa_outcome == "hit"),
+      outs = sum(pa_outcome == "out"),
+      strikeouts = sum(pa_outcome == "strikeout"),
+      BB = sum(pa_outcome == "walk"),
+      IBB = sum(pa_outcome == "intentional_walk"),
+      SF = sum(pa_outcome == "sacrifice_fly"),
+      HBP = sum(pa_outcome == "hit_by_pitch"),
+      
+      batted_balls_count = hits + outs,
+      AB = hits + outs + strikeouts,
+      total_pa = AB + BB - IBB + SF + HBP,
+      
+      mean_xwobacon = mean(predicted_xwobacon, na.rm = TRUE),
+      
+      wBB_HBP = 0.690,
+      xwoba_numerator = (mean_xwobacon * batted_balls_count) + (wBB_HBP * (BB - IBB + HBP)),
+      predicted_xwoba_full = ifelse(total_pa > 0, xwoba_numerator / total_pa, NA_real_),
+      
+      .groups = "drop"
+    )
+  
+  cat("xwOBA calculated for", nrow(player_xwoba_full), "player-season combinations\n")
+  
+  # Step 4: Merge back to individual PA level WITH SEASON AWARENESS
+  enhanced_data <- all_pa %>%
+    left_join(
+      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon),
+      by = c("Batter", "Date", "Inning", "PAofInning")
+    ) %>%
+    left_join(
+      player_xwoba_full %>% select(Batter, Expected_Season, predicted_xwoba_full, mean_xwobacon),
+      by = c("Batter", "Expected_Season")  # JOIN ON BOTH PLAYER AND SEASON
+    ) %>%
+    mutate(
+      predicted_xwoba_final = predicted_xwoba_full,
+      predicted_xwobacon_final = ifelse(!is.na(predicted_xwobacon), predicted_xwobacon, mean_xwobacon)
+    )
+  
+  cat("=== CALCULATION SUMMARY ===\n")
+  cat("Total records:", nrow(enhanced_data), "\n")
+  cat("Records with xwOBA:", sum(!is.na(enhanced_data$predicted_xwoba_final)), "\n")
+  cat("Records with xwOBACON:", sum(!is.na(enhanced_data$predicted_xwobacon_final)), "\n")
+  
+  # Show season breakdown
+  if ("Expected_Season" %in% names(enhanced_data)) {
+    season_summary <- enhanced_data %>%
+      group_by(Expected_Season) %>%
+      summarise(
+        Players = n_distinct(Batter),
+        Records = n(),
+        .groups = "drop"
+      )
+    cat("Season breakdown:\n")
+    print(season_summary)
+  }
+  
+  return(enhanced_data)
+}
+
+
 
 # Run the complete model
 # Load pre-trained model results from pipeline (avoids retraining on startup)
