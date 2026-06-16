@@ -797,152 +797,316 @@ calculate_enhanced_data <- function(raw_data, ultimate_results) {
   )
 }
 
-# calculate_expected_xwoba_and_full: used by initialize_enhanced_data_composite
-# in the Shiny server to score players on-demand when session starts.
-calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
-  
-  # CRITICAL FIX: Add season extraction BEFORE any processing
-  if ("Date" %in% names(raw_data)) {
-    raw_data <- raw_data %>%
-      mutate(
-        Expected_Season = as.character(year(as.Date(Date)))
-      )
-    cat("Season extraction complete. Seasons found:", paste(unique(raw_data$Expected_Season), collapse = ", "), "\n")
-  } else {
-    # If no Date column, assume current year or add a default
-    raw_data <- raw_data %>%
-      mutate(Expected_Season = "2025")
-    cat("No Date column found - using default season 2025\n")
-  }
-  
-  # Step 1: Filter to batted balls with complete data
-  batted_balls <- raw_data %>%
-    filter(
-      PlayResult %in% c("Single", "Double", "Triple", "HomeRun", "Out",
-                        "FieldersChoice", "Error", "Sacrifice") &
-        !is.na(ExitSpeed) & ExitSpeed > 0 &
-        !is.na(Angle) & !is.na(Batter)
-    )
-  
-  cat("Batted balls with tracking data:", nrow(batted_balls), "\n")
-  
-  # Outcome classification for batted balls
-  batted_balls$outcome <- case_when(
-    batted_balls$PlayResult %in% c("Single") ~ "single",
-    batted_balls$PlayResult %in% c("Double") ~ "double", 
-    batted_balls$PlayResult %in% c("Triple") ~ "triple",
-    batted_balls$PlayResult %in% c("HomeRun") ~ "home_run",
-    batted_balls$PlayResult %in% c("Out", "FieldersChoice", "Error", "Sacrifice") ~ "out",
-    TRUE ~ "other"
+# ============================================================================
+#  NECBL TEAM MAPPING + COMPOSITE KEY + PRESTOSPORTS SCRAPER
+#  Used by pipeline_daily.R to pre-scrape NECBL stats for caching
+#  so app.R doesn't need to make live HTTP requests (which get 403'd
+#  from shinyapps.io IP ranges).
+# ============================================================================
+
+necbl_team_mapping_enhanced <- list(
+  "BRI_B" = list(
+    name = "Bristol Blues", 
+    abbrev = "BRI",
+    team_id = "89490"
+  ),
+  "DAN_WES" = list(
+    name = "Danbury Westerners", 
+    abbrev = "DAN",
+    team_id = "6402"
+  ),
+  "KEE_SWA" = list(
+    name = "Keene SwampBats", 
+    abbrev = "KSB",
+    team_id = "6401"
+  ),
+  "MAR_VIN" = list(
+    name = "Martha's Vineyard Sharks", 
+    abbrev = "MV",
+    team_id = "142675"
+  ),
+  "MYS_SCH" = list(
+    name = "Mystic Schooners", 
+    abbrev = "MSC",
+    team_id = "11912"
+  ),
+  "NEW_GUL" = list(
+    name = "Newport Gulls", 
+    abbrev = "NG",
+    team_id = "6458"
+  ),
+  "NOR_ADA" = list(
+    name = "North Adams Steeplecats", 
+    abbrev = "NSC",
+    team_id = "6404"
+  ),
+  # FIXED: Added NSH_N mapping
+  "NSH_N" = list(
+    name = "North Shore Navigators", 
+    abbrev = "NSN",
+    team_id = "154432"
+  ),
+  # Ocean State Waves - handles both OCE_STA and OCE_STA6
+  "OCE_STA" = list(
+    name = "Ocean State Waves", 
+    abbrev = "OSW",
+    team_id = "51489"
+  ),
+  "OCE_STA6" = list(
+    name = "Ocean State Waves", 
+    abbrev = "OSW",
+    team_id = "51489"
+  ),
+  "SAN_MAI" = list(
+    name = "Sanford Mainers", 
+    abbrev = "SM",
+    team_id = "6459"
+  ),
+  "UPP_VAL" = list(
+    name = "Upper Valley Nighthawks", 
+    abbrev = "UVNH",
+    team_id = "104040"
+  ),
+  "VAL_BLU" = list(
+    name = "Valley Blue Sox", 
+    abbrev = "VAL",
+    team_id = "6403"
+  ),
+  "VER_MOU" = list(
+    name = "Vermont Mountaineers", 
+    abbrev = "VM",
+    team_id = "6405"
+  ),
+  # Additional mappings for unmapped teams
+  "WIN_MUS" = list(
+    name = "Winnipesaukee Muskrats", 
+    abbrev = "WM",
+    team_id = "6406"
+  ),
+  "NWL_WB" = list(
+    name = "Newport Gulls", 
+    abbrev = "NG",
+    team_id = "6458"
+  ),
+  "NEC_EAS" = list(
+    name = "NECBL East", 
+    abbrev = "NE",
+    team_id = "unknown"
+  ),
+  "NEC_WES" = list(
+    name = "NECBL West", 
+    abbrev = "NW", 
+    team_id = "unknown"
   )
-  
-  batted_balls <- batted_balls[batted_balls$outcome != "other", ]
-  
-  # wOBA weights
-  woba_weights_vector <- c(0.000, 0.888, 1.271, 1.616, 2.101)
-  
-  # Get expected predictions for batted balls
-  if (!is.null(xgb_expected) && exists("dtest")) {
-    test_probs <- predict(xgb_expected, dtest, reshape = TRUE)
-    colnames(test_probs) <- c("P_out", "P_single", "P_double", "P_triple", "P_home_run")
-    predicted_xwobacon <- as.vector(test_probs %*% woba_weights_vector)
-    batted_balls$predicted_xwobacon <- predicted_xwobacon
-  } else {
-    # Fallback calculation if expected objects not available
-    batted_balls$predicted_xwobacon <- pmin(2.5, pmax(0, 
-                                                      0.1 + (batted_balls$ExitSpeed - 60) * 0.01 + 
-                                                        pmax(0, 30 - abs(batted_balls$Angle - 20)) * 0.005
-    ))
-  }
-  
-  cat("xwOBACON calculated for", nrow(batted_balls), "batted balls\n")
-  
-  # Step 2: Get ALL plate appearances for each player BY SEASON
-  all_pa <- raw_data %>% 
-    filter(!is.na(Batter)) %>%
-    mutate(
-      pa_outcome = case_when(
-        PlayResult %in% c("Single", "Double", "Triple", "HomeRun") ~ "hit",
-        PlayResult %in% c("Out", "FieldersChoice", "Error") ~ "out", 
-        PlayResult %in% c("Sacrifice") ~ "sacrifice_fly",
-        KorBB == "Walk" ~ "walk",
-        KorBB == "IntentionalWalk" ~ "intentional_walk",
-        PitchCall == "HitByPitch" ~ "hit_by_pitch",
-        KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging") ~ "strikeout",
-        TRUE ~ "other"
-      )
-    ) %>%
-    filter(pa_outcome != "other")
-  
-  cat("Total plate appearances:", nrow(all_pa), "\n")
-  
-  # Step 3: Calculate player-level xwOBA BY SEASON (critical fix)
-  player_xwoba_full <- all_pa %>%
-    left_join(
-      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon, Expected_Season),
-      by = c("Batter", "Date", "Inning", "PAofInning")
-    ) %>%
-    # CRITICAL FIX: Use Expected_Season.x (from all_pa) for grouping
-    mutate(
-      Expected_Season = coalesce(Expected_Season.x, Expected_Season.y)
-    ) %>%
-    group_by(Batter, Expected_Season) %>%  # GROUP BY SEASON TOO!
-    summarise(
-      hits = sum(pa_outcome == "hit"),
-      outs = sum(pa_outcome == "out"),
-      strikeouts = sum(pa_outcome == "strikeout"),
-      BB = sum(pa_outcome == "walk"),
-      IBB = sum(pa_outcome == "intentional_walk"),
-      SF = sum(pa_outcome == "sacrifice_fly"),
-      HBP = sum(pa_outcome == "hit_by_pitch"),
-      
-      batted_balls_count = hits + outs,
-      AB = hits + outs + strikeouts,
-      total_pa = AB + BB - IBB + SF + HBP,
-      
-      mean_xwobacon = mean(predicted_xwobacon, na.rm = TRUE),
-      
-      wBB_HBP = 0.690,
-      xwoba_numerator = (mean_xwobacon * batted_balls_count) + (wBB_HBP * (BB - IBB + HBP)),
-      predicted_xwoba_full = ifelse(total_pa > 0, xwoba_numerator / total_pa, NA_real_),
-      
-      .groups = "drop"
-    )
-  
-  cat("xwOBA calculated for", nrow(player_xwoba_full), "player-season combinations\n")
-  
-  # Step 4: Merge back to individual PA level WITH SEASON AWARENESS
-  enhanced_data <- all_pa %>%
-    left_join(
-      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon),
-      by = c("Batter", "Date", "Inning", "PAofInning")
-    ) %>%
-    left_join(
-      player_xwoba_full %>% select(Batter, Expected_Season, predicted_xwoba_full, mean_xwobacon),
-      by = c("Batter", "Expected_Season")  # JOIN ON BOTH PLAYER AND SEASON
-    ) %>%
-    mutate(
-      predicted_xwoba_final = predicted_xwoba_full,
-      predicted_xwobacon_final = ifelse(!is.na(predicted_xwobacon), predicted_xwobacon, mean_xwobacon)
-    )
-  
-  cat("=== CALCULATION SUMMARY ===\n")
-  cat("Total records:", nrow(enhanced_data), "\n")
-  cat("Records with xwOBA:", sum(!is.na(enhanced_data$predicted_xwoba_final)), "\n")
-  cat("Records with xwOBACON:", sum(!is.na(enhanced_data$predicted_xwobacon_final)), "\n")
-  
-  # Show season breakdown
-  if ("Expected_Season" %in% names(enhanced_data)) {
-    season_summary <- enhanced_data %>%
-      group_by(Expected_Season) %>%
-      summarise(
-        Players = n_distinct(Batter),
-        Records = n(),
-        .groups = "drop"
-      )
-    cat("Season breakdown:\n")
-    print(season_summary)
-  }
-  
-  return(enhanced_data)
+)
+
+# Helper function to create composite keys
+create_composite_key <- function(last_name, first_initial, team_abbrev, season) {
+  paste(
+    toupper(trimws(last_name)),
+    toupper(trimws(first_initial)),
+    toupper(trimws(team_abbrev)),
+    season,
+    sep = "_"
+  )
 }
+
+# PrestoSports scraper - static print template (no JavaScript required)
+# URL: https://newenglandcollegiateleague.prestosports.com/sports/bsb/YEAR/teams/SLUG
+#      ?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h
+get_necbl_woba_by_season <- function(season = "2026") {
+  cat("=== SCRAPING NECBL", season, "SEASON (PrestoSports) ===\n")
+
+  team_slugs <- list(
+    "UPP_VAL" = "uppervalleynighthawks",
+    "VAL_BLU" = "valleybluesox",
+    "KEE_SWA" = "keeneswampbats",
+    "BRI_B"   = "bristolblues",
+    "MAR_VIN" = "marthasvineyardsharks",
+    "OCE_STA" = "oceanstatewaves",
+    "NOR_ADA" = "northadamssteeplecats",
+    "MYS_SCH" = "mysticschooners",
+    "NEW_GUL" = "newportgulls",
+    "SAN_MAI" = "sanfordmainers",
+    "VER_MOU" = "vermontmountaineers",
+    "DAN_WES" = "danburywesterners",
+    "NSN"     = "northshorenavigators"
+  )
+
+  all_woba <- data.frame()
+
+  for (team_code in names(team_slugs)) {
+    slug      <- team_slugs[[team_code]]
+    team_info <- necbl_team_mapping_enhanced[[team_code]]
+    if (is.null(team_info)) next
+    team_name   <- team_info$name
+    team_abbrev <- team_info$abbrev
+
+    # Static print template - renders without JavaScript
+    url <- paste0(
+      "https://newenglandcollegiateleague.prestosports.com/sports/bsb/",
+      season, "/teams/", slug,
+      "?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h"
+    )
+
+    cat("Scraping", team_name, "...\n")
+
+    tryCatch({
+      response <- httr::GET(
+        url,
+        httr::user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+        httr::timeout(20)
+      )
+
+      if (httr::status_code(response) != 200) {
+        cat("  HTTP", httr::status_code(response), "- skipping\n")
+        next
+      }
+
+      page   <- rvest::read_html(httr::content(response, as = "text", encoding = "UTF-8"))
+      tables <- rvest::html_table(page, fill = TRUE)
+
+      # Find the hitting table - has AB and H columns and NAME/Player column
+      hitting_tbl <- NULL
+      for (tbl in tables) {
+        col_upper <- toupper(names(tbl))
+        has_ab    <- any(grepl("^AB", col_upper))
+        has_h     <- any(col_upper == "H")
+        has_name  <- any(grepl("PLAYER|NAME|^#$", col_upper))
+        if (has_ab && has_h && has_name && nrow(tbl) > 2) {
+          hitting_tbl <- tbl
+          break
+        }
+      }
+
+      if (is.null(hitting_tbl)) {
+        cat("  No hitting table found - skipping\n")
+        next
+      }
+
+      names(hitting_tbl) <- toupper(trimws(names(hitting_tbl)))
+
+      get_col <- function(df, ...) {
+        nms <- toupper(names(df))
+        for (nm in c(...)) {
+          idx <- which(nms == nm)
+          if (length(idx) > 0) return(idx[1])
+        }
+        NA_integer_
+      }
+
+      name_col <- get_col(hitting_tbl, "PLAYER", "NAME")
+      ab_col   <- get_col(hitting_tbl, "AB", "AB (AT BATS)")
+      h_col    <- get_col(hitting_tbl, "H", "H (HITS)")
+      d_col    <- get_col(hitting_tbl, "2B", "2B (DOUBLES)")
+      t_col    <- get_col(hitting_tbl, "3B", "3B (TRIPLES)")
+      hr_col   <- get_col(hitting_tbl, "HR", "HR (HOME RUNS)")
+      bb_col   <- get_col(hitting_tbl, "BB", "BB (BASE ON BALLS)")
+      hbp_col  <- get_col(hitting_tbl, "HBP", "HBP (HIT BY PITCH)")
+      so_col   <- get_col(hitting_tbl, "SO", "SO (STRIKEOUTS)", "K")
+
+      if (is.na(name_col) || is.na(ab_col) || is.na(h_col)) {
+        cat("  Missing required columns - skipping\n")
+        next
+      }
+
+      team_stats <- data.frame()
+
+      for (row_idx in seq_len(nrow(hitting_tbl))) {
+        tryCatch({
+          player_raw <- trimws(as.character(hitting_tbl[row_idx, name_col]))
+
+          # Skip totals, opponents, header rows, separator rows
+          if (is.na(player_raw) || nchar(player_raw) < 2) next
+          if (grepl("^(Total|Opponent|Player|Name|---)", player_raw, ignore.case = TRUE)) next
+
+          # Remove trailing dots used for monospace padding ("Hudson Ellis.......")
+          player_clean <- trimws(gsub("\\.+$", "", player_raw))
+          if (nchar(player_clean) < 2) next
+
+          safe_num <- function(col_idx, default = 0) {
+            if (is.na(col_idx)) return(default)
+            v <- suppressWarnings(as.numeric(gsub("[^0-9.]", "",
+                    as.character(hitting_tbl[row_idx, col_idx]))))
+            if (is.na(v) || length(v) == 0) default else v
+          }
+
+          ab_val  <- safe_num(ab_col)
+          h_val   <- safe_num(h_col)
+          if (ab_val <= 0) next
+
+          d_val   <- safe_num(d_col)
+          t_val   <- safe_num(t_col)
+          hr_val  <- safe_num(hr_col)
+          bb_val  <- safe_num(bb_col)
+          hbp_val <- safe_num(hbp_col)
+          so_val  <- safe_num(so_col)
+
+          singles_val        <- max(0, h_val - d_val - t_val - hr_val)
+          PA                 <- ab_val + bb_val + hbp_val
+          batted_balls_count <- max(1, ab_val - so_val)
+
+          if (PA <= 0) next
+
+          actual_wOBA <- (singles_val * 0.888 + d_val * 1.271 +
+                          t_val * 1.616 + hr_val * 2.101 +
+                          (bb_val + hbp_val) * 0.690) / PA
+
+          actual_wOBACON <- (singles_val * 0.888 + d_val * 1.271 +
+                             t_val * 1.616 + hr_val * 2.101) / batted_balls_count
+
+          # Name parsing: "First Last" (trailing dots already stripped)
+          words <- str_trim(str_split(player_clean, "\\s+")[[1]])
+          words <- words[nchar(words) > 0]
+
+          if (length(words) >= 2) {
+            first_initial <- toupper(substr(words[1], 1, 1))
+            last_name     <- toupper(paste(words[2:length(words)], collapse = " "))
+          } else if (length(words) == 1) {
+            first_initial <- "X"
+            last_name     <- toupper(words[1])
+          } else next
+
+          composite_key <- create_composite_key(last_name, first_initial, team_abbrev, season)
+
+          team_stats <- rbind(team_stats, data.frame(
+            Player                 = player_clean,
+            Last_Name              = last_name,
+            First_Initial          = first_initial,
+            Team                   = team_name,
+            Team_Code              = team_code,
+            Team_Abbrev            = team_abbrev,
+            Season                 = season,
+            AB                     = ab_val,
+            H                      = h_val,
+            Singles                = singles_val,
+            Doubles                = d_val,
+            Triples                = t_val,
+            HR                     = hr_val,
+            BB                     = bb_val,
+            HBP                    = hbp_val,
+            SO                     = so_val,
+            PA                     = PA,
+            Batted_Balls           = batted_balls_count,
+            wOBA                   = round(actual_wOBA, 3),
+            wOBACON                = round(actual_wOBACON, 3),
+            Player_Team_Season_Key = composite_key,
+            stringsAsFactors = FALSE
+          ))
+
+        }, error = function(e) invisible(NULL))
+      }
+
+      if (nrow(team_stats) > 0) {
+        cat("  Got", nrow(team_stats), "players\n")
+        all_woba <- rbind(all_woba, team_stats)
+      } else {
+        cat("  No valid player rows found\n")
+      }
+
+      Sys.sleep(0.5)
+
+    }, error = function(e) {
+      cat("  Error:", e$message, "\n")
+    })
+  }
