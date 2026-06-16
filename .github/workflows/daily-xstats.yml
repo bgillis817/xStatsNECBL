@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v8
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v9
           restore-keys: |
             ${{ runner.os }}-r-
 
@@ -47,12 +47,6 @@ jobs:
           GDRIVE_FOLDER_ID: "1haJdctNyLTx81GXlvCdBRDSWKrDAlKAw"
           LIVE_RDS_FILE_ID: "1IFO08F2YoO1qUXCw3GiU1k6FOXwt4Q0b"
         run: Rscript pipeline_daily.R
-
-      - name: Pull latest repo changes before deploy
-        run: |
-          git fetch origin main
-          git checkout origin/main -- app.R pipeline_functions.R pipeline_daily.R
-          echo "Pulled latest files from main"
 
       - name: Commit and push updated data
         id: commit
