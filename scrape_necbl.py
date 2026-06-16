@@ -65,6 +65,15 @@ def make_driver():
     )
     from webdriver_manager.chrome import ChromeDriverManager
     from selenium.webdriver.chrome.service import Service
+    import subprocess, os
+    # Use system chrome if available, otherwise let webdriver_manager find it
+    chrome_path = None
+    for path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser"]:
+        if os.path.exists(path):
+            chrome_path = path
+            break
+    if chrome_path:
+        opts.binary_location = chrome_path
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=opts)
 
