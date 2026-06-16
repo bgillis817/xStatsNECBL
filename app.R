@@ -838,16 +838,19 @@ library(plotly)
 
 # Load cached scoring results from pipeline (pre-computed to avoid startup timeout)
 if (file.exists("xwoba_model.rds")) {
-  model_cache       <- readRDS("xwoba_model.rds")
-  enhanced_data     <- model_cache$enhanced_data
-  player_xwoba_full <- model_cache$player_xwoba_full
-  batted_balls      <- model_cache$batted_balls
+  model_cache        <- readRDS("xwoba_model.rds")
+  enhanced_data      <- model_cache$enhanced_data
+  player_xwoba_full  <- model_cache$player_xwoba_full
+  batted_balls       <- model_cache$batted_balls
+  necbl_stats_cache  <- if (!is.null(model_cache$necbl_stats_cache)) model_cache$necbl_stats_cache else list()
   cat("Loaded pre-computed enhanced_data:", nrow(enhanced_data), "rows\n")
+  cat("NECBL stats cached for seasons:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
 } else {
   cat("WARNING: xwoba_model.rds not found - scores may be missing\n")
-  enhanced_data     <- data.frame()
-  player_xwoba_full <- data.frame()
-  batted_balls      <- data.frame()
+  enhanced_data      <- data.frame()
+  player_xwoba_full  <- data.frame()
+  batted_balls       <- data.frame()
+  necbl_stats_cache  <- list()
 }
 
 # ===================================================================
@@ -1065,9 +1068,13 @@ get_necbl_woba_by_season <- function(season = "2026") {
       names(hitting_tbl) <- toupper(trimws(names(hitting_tbl)))
 
       get_col <- function(df, ...) {
-        nms <- toupper(names(df))
+        nms <- toupper(trimws(names(df)))
         for (nm in c(...)) {
+          # Exact match first
           idx <- which(nms == nm)
+          if (length(idx) > 0) return(idx[1])
+          # Prefix match (e.g. "2B" matches "2B (DOUBLES)")
+          idx <- which(startsWith(nms, nm))
           if (length(idx) > 0) return(idx[1])
         }
         NA_integer_
@@ -1905,8 +1912,8 @@ server <- function(input, output, session) {
       incProgress(0.3, detail = "Scraping actual data...")
       
       tryCatch({
-        # Scrape selected season
-        season_data <- get_necbl_woba_by_season(input$primary_season)
+        # Load from pre-scraped cache (pipeline scrapes daily via GitHub Actions)
+        season_data <- necbl_stats_cache[[input$primary_season]]
         
         if (!is.null(season_data) && nrow(season_data) > 0) {
           values$necbl_data_current <- season_data
