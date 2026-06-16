@@ -953,6 +953,7 @@ necbl_team_mapping_enhanced <- list(
 
 # NECBL URLs by season with proper season IDs
 necbl_urls_by_season <- list(
+  "2026" = list(seasonid = "34460"),
   "2025" = list(seasonid = "34029"),
   "2024" = list(seasonid = "33860"),
   "2023" = list(seasonid = "33589"),
@@ -988,252 +989,199 @@ get_team_info_from_model_code <- function(model_team_code) {
 # SECTION 4: ENHANCED SCRAPER WITH COMPOSITE KEY GENERATION & FIXES
 # ===================================================================
 
-# Enhanced scraper with composite key generation for exact matching
-get_necbl_woba_by_season <- function(season = "2025") {
-  cat("=== SCRAPING NECBL", season, "SEASON WITH COMPOSITE KEYS ===\n")
+# PrestoSports scraper - replaces pointstreak version
+# URL format: https://www.necbl.com/sports/bsb/YEAR/teams/SLUG?view=lineup
+get_necbl_woba_by_season <- function(season = "2026") {
+  cat("=== SCRAPING NECBL", season, "SEASON (PrestoSports) ===\n")
   
-  season_info <- necbl_urls_by_season[[season]]
-  if (is.null(season_info)) {
-    cat("ERROR: Season", season, "not available\n")
-    return(data.frame())
-  }
+  # Team slug mapping for PrestoSports
+  team_slugs <- list(
+    "UPP_VAL" = "uppervalleynighthawks",
+    "VAL_BLU" = "valleybluesox",
+    "KEE_SWA" = "keeneswampbats",
+    "BRI_B"   = "bristolblues",
+    "MAR_VIN" = "marthasvineyardsharks",
+    "OCE_STA" = "oceanstatewaves",
+    "NOR_ADA" = "northadamssteeplecats",
+    "MYS_SCH" = "mysticschooners",
+    "NEW_GUL" = "newportgulls",
+    "SAN_MAI" = "sanfordmainers",
+    "VER_MOU" = "vermontmountaineers",
+    "DAN_WES" = "danburywesterners",
+    "NSN"     = "northshorenavigators"
+  )
   
-  seasonid <- season_info$seasonid
   all_woba <- data.frame()
   
-  cat("Using UNIVERSAL URL format with leagueid=204 for all teams\n")
-  
-  for (team_code in names(necbl_team_mapping_enhanced)) {
+  for (team_code in names(team_slugs)) {
+    slug      <- team_slugs[[team_code]]
     team_info <- necbl_team_mapping_enhanced[[team_code]]
-    team_name <- team_info$name
+    if (is.null(team_info)) next
+    team_name   <- team_info$name
     team_abbrev <- team_info$abbrev
-    team_id <- team_info$team_id
     
-    # Skip duplicate Ocean State entries (we only need to scrape once)
-    if (team_code == "OCE_STA6") next
-    # Skip other duplicate entries
-    if (team_code %in% c("NWL_WB", "WIN_MUS", "NEC_EAS", "NEC_WES")) next
+    url <- paste0("https://www.necbl.com/sports/bsb/", season,
+                  "/teams/", slug, "?view=lineup")
     
-    # UNIVERSAL FORMAT: ALL seasons and ALL teams use leagueid=204
-    url <- paste0("http://necbl.wttbaseball.pointstreak.com/team_stats.html?leagueid=204&seasonid=", 
-                  seasonid, "&teamid=", team_id)
-    
-    cat("Scraping", team_name, "(", team_abbrev, ") for", season, "...\n")
+    cat("Scraping", team_name, "from PrestoSports...\n")
     
     tryCatch({
-      response <- GET(url, user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"), timeout(15))
-      if (status_code(response) != 200) {
-        cat("HTTP", status_code(response), "for", team_name, "\n")
+      response <- httr::GET(
+        url,
+        httr::user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+        httr::timeout(15)
+      )
+      
+      if (httr::status_code(response) != 200) {
+        cat("HTTP", httr::status_code(response), "for", team_name, "\n")
         next
       }
       
-      page <- read_html(response)
-      tables <- html_table(page, fill = TRUE)
+      page   <- rvest::read_html(response)
+      tables <- rvest::html_table(page, fill = TRUE)
       
-      for (j in seq_along(tables)) {
-        table <- tables[[j]]
-        
-        if (ncol(table) >= 10 && nrow(table) > 2) {
-          col_text <- paste(names(table), collapse = " ")
-          
-          if (grepl("Player.*AB.*H", col_text, ignore.case = TRUE)) {
-            # Find required columns
-            ab_col <- which(grepl("^AB$", names(table), ignore.case = TRUE))[1]
-            h_col <- which(grepl("^H$", names(table), ignore.case = TRUE))[1]
-            doubles_col <- which(grepl("^2B$", names(table), ignore.case = TRUE))[1]
-            triples_col <- which(grepl("^3B$", names(table), ignore.case = TRUE))[1]
-            hr_col <- which(grepl("^HR$", names(table), ignore.case = TRUE))[1]
-            bb_col <- which(grepl("^BB$", names(table), ignore.case = TRUE))[1]
-            hbp_col <- which(grepl("^HBP$", names(table), ignore.case = TRUE))[1]
-            so_col <- which(grepl("^SO$|^K$", names(table), ignore.case = TRUE))[1]
-            
-            if (is.na(ab_col) || is.na(h_col)) next
-            
-            team_stats <- data.frame()
-            
-            for (row_idx in 2:nrow(table)) {
-              tryCatch({
-                player_raw <- as.character(table[row_idx, 1])
-                
-                # Skip invalid rows
-                if (is.na(player_raw) || nchar(trimws(player_raw)) < 3 || 
-                    grepl("Total|AVG|OBP|SLG|---|^\\s*$|Player", player_raw, ignore.case = TRUE)) {
-                  next
-                }
-                
-                # Extract stats
-                ab_val <- as.numeric(as.character(table[row_idx, ab_col]))
-                h_val <- as.numeric(as.character(table[row_idx, h_col]))
-                
-                if (is.na(ab_val) || is.na(h_val) || ab_val <= 0) next
-                
-                # Extract other stats with defaults
-                doubles_val <- if (!is.na(doubles_col)) as.numeric(as.character(table[row_idx, doubles_col])) else 0
-                if (is.na(doubles_val)) doubles_val <- 0
-                
-                triples_val <- if (!is.na(triples_col)) as.numeric(as.character(table[row_idx, triples_col])) else 0
-                if (is.na(triples_val)) triples_val <- 0
-                
-                hr_val <- if (!is.na(hr_col)) as.numeric(as.character(table[row_idx, hr_col])) else 0
-                if (is.na(hr_val)) hr_val <- 0
-                
-                bb_val <- if (!is.na(bb_col)) as.numeric(as.character(table[row_idx, bb_col])) else 0
-                if (is.na(bb_val)) bb_val <- 0
-                
-                hbp_val <- if (!is.na(hbp_col)) as.numeric(as.character(table[row_idx, hbp_col])) else 0
-                if (is.na(hbp_val)) hbp_val <- 0
-                
-                so_val <- if (!is.na(so_col)) as.numeric(as.character(table[row_idx, so_col])) else 0
-                if (is.na(so_val)) so_val <- 0
-                
-                # Calculate singles and metrics
-                singles_val <- max(0, h_val - doubles_val - triples_val - hr_val)
-                PA <- ab_val + bb_val + hbp_val
-                Batted_Balls <- ab_val - so_val
-                
-                if (PA > 0 && Batted_Balls > 0) {
-                  # wOBA: weighted value / PAs
-                  actual_wOBA <- (singles_val * 0.888 + doubles_val * 1.271 + 
-                                    triples_val * 1.616 + hr_val * 2.101 + 
-                                    (bb_val + hbp_val) * 0.690) / PA
-                  
-                  # wOBACON: weighted value / Batted_Balls
-                  actual_wOBACON <- (singles_val * 0.888 + doubles_val * 1.271 + 
-                                       triples_val * 1.616 + hr_val * 2.101) / Batted_Balls
-                  
-                  # ===================================================================
-                  # SIMPLIFIED NAME STANDARDIZATION - GUARANTEED TO WORK
-                  # ===================================================================
-                  
-                  # Start with defaults
-                  last_name <- "UNKNOWN"
-                  first_initial <- "X"
-                  
-                  # Clean the raw name
-                  clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s,.-]", ""))
-                  clean_name <- str_trim(gsub("^[Xx]\\s+", "", clean_name))
-                  
-                  # Simple parsing with error protection
-                  tryCatch({
-                    # Handle parenthetical names like "Kea, J (Jaydon Aukai Kea)"
-                    if (grepl("\\(.*\\)", clean_name)) {
-                      # Try to extract from parentheses first
-                      paren_content <- str_extract(clean_name, "\\(([^)]+)\\)")
-                      if (!is.na(paren_content)) {
-                        full_name_inside <- gsub("[()]", "", paren_content)
-                        name_parts <- str_trim(str_split(full_name_inside, "\\s+")[[1]])
-                        if (length(name_parts) >= 2) {
-                          first_initial <- toupper(substr(name_parts[1], 1, 1))
-                          last_name <- toupper(name_parts[length(name_parts)])
-                        }
-                      }
-                    }
-                    
-                    # If we still have defaults, try standard parsing
-                    if (last_name == "UNKNOWN") {
-                      if (grepl(",", clean_name)) {
-                        # "Last, First" format
-                        parts <- str_split(clean_name, ",")[[1]]
-                        if (length(parts) >= 2) {
-                          last_name <- toupper(str_trim(parts[1]))
-                          first_part <- str_trim(parts[2])
-                          first_initial <- toupper(substr(first_part, 1, 1))
-                        }
-                      } else {
-                        # "First Last" format
-                        words <- str_trim(str_split(clean_name, "\\s+")[[1]])
-                        if (length(words) >= 2) {
-                          first_initial <- toupper(substr(words[1], 1, 1))
-                          last_name <- toupper(paste(words[2:length(words)], collapse = " "))
-                        } else if (length(words) == 1) {
-                          last_name <- toupper(words[1])
-                          first_initial <- "X"
-                        }
-                      }
-                    }
-                  }, error = function(e) {
-                    # If anything fails, use the clean name as last name
-                    last_name <- toupper(str_trim(clean_name))
-                    first_initial <- "X"
-                  })
-                  
-                  # Create standardized name - GUARANTEED TO EXIST
-                  standardized_name <- paste(last_name, first_initial, sep = ", ")
-                  
-                  # Generate composite key
-                  composite_key <- create_composite_key(last_name, first_initial, team_abbrev, season)
-                  
-                  # ===================================================================
-                  # END OF SIMPLIFIED NAME STANDARDIZATION
-                  # ===================================================================
-                  
-                  player_row <- data.frame(
-                    Player = standardized_name,
-                    Last_Name = last_name,
-                    First_Name = paste0(first_initial, "."),  # Store as "J."
-                    First_Initial = first_initial,
-                    Player_Team_Season_Key = composite_key,
-                    wOBA = round(actual_wOBA, 3),
-                    wOBACON = round(actual_wOBACON, 3),
-                    Season = season,
-                    Team = team_name,
-                    Team_Abbrev = team_abbrev,
-                    PA = PA,
-                    Batted_Balls = Batted_Balls,
-                    Singles = singles_val,
-                    Doubles = doubles_val,
-                    Triples = triples_val,
-                    HRs = hr_val,
-                    BBs = bb_val,
-                    HBPs = hbp_val,
-                    SOs = so_val,
-                    stringsAsFactors = FALSE
-                  )
-                  
-                  team_stats <- rbind(team_stats, player_row)
-                }
-              }, error = function(e) {
-                cat("Error processing row", row_idx, "for", team_name, ":", e$message, "\n")
-              })
-            }
-            
-            if (nrow(team_stats) > 0) {
-              all_woba <- rbind(all_woba, team_stats)
-            }
-            break
-          }
+      hitting_tbl <- NULL
+      for (tbl in tables) {
+        col_names <- toupper(names(tbl))
+        if ("AB" %in% col_names && "H" %in% col_names && "NAME" %in% col_names) {
+          hitting_tbl <- tbl
+          break
         }
       }
+      
+      if (is.null(hitting_tbl)) {
+        cat("No hitting table found for", team_name, "\n")
+        next
+      }
+      
+      # Standardize column names
+      names(hitting_tbl) <- toupper(names(hitting_tbl))
+      
+      get_col <- function(df, ...) {
+        nms <- toupper(names(df))
+        for (nm in c(...)) {
+          idx <- which(nms == nm)
+          if (length(idx) > 0) return(idx[1])
+        }
+        return(NA_integer_)
+      }
+      
+      name_col <- get_col(hitting_tbl, "NAME")
+      ab_col   <- get_col(hitting_tbl, "AB")
+      h_col    <- get_col(hitting_tbl, "H")
+      d_col    <- get_col(hitting_tbl, "2B")
+      t_col    <- get_col(hitting_tbl, "3B")
+      hr_col   <- get_col(hitting_tbl, "HR")
+      bb_col   <- get_col(hitting_tbl, "BB")
+      hbp_col  <- get_col(hitting_tbl, "HBP")
+      k_col    <- get_col(hitting_tbl, "K", "SO")
+      
+      if (is.na(ab_col) || is.na(h_col) || is.na(name_col)) {
+        cat("Missing required columns for", team_name, "\n")
+        next
+      }
+      
+      team_stats <- data.frame()
+      
+      for (row_idx in seq_len(nrow(hitting_tbl))) {
+        tryCatch({
+          player_raw <- as.character(hitting_tbl[row_idx, name_col])
+          if (is.na(player_raw) || nchar(trimws(player_raw)) < 3) next
+          if (grepl("^(Total|Name|Player|---)", trimws(player_raw), ignore.case = TRUE)) next
+          
+          ab_val  <- suppressWarnings(as.numeric(as.character(hitting_tbl[row_idx, ab_col])))
+          h_val   <- suppressWarnings(as.numeric(as.character(hitting_tbl[row_idx, h_col])))
+          if (is.na(ab_val) || is.na(h_val) || ab_val <= 0) next
+          
+          safe_num <- function(df, col, default = 0) {
+            if (is.na(col)) return(default)
+            v <- suppressWarnings(as.numeric(as.character(df[row_idx, col])))
+            if (is.na(v)) default else v
+          }
+          
+          d_val   <- safe_num(hitting_tbl, d_col)
+          t_val   <- safe_num(hitting_tbl, t_col)
+          hr_val  <- safe_num(hitting_tbl, hr_col)
+          bb_val  <- safe_num(hitting_tbl, bb_col)
+          hbp_val <- safe_num(hitting_tbl, hbp_col)
+          k_val   <- safe_num(hitting_tbl, k_col)
+          
+          singles_val <- max(0, h_val - d_val - t_val - hr_val)
+          PA          <- ab_val + bb_val + hbp_val
+          batted_balls_count <- ab_val - k_val
+          
+          if (PA <= 0) next
+          
+          actual_wOBA <- (singles_val * 0.888 + d_val * 1.271 +
+                          t_val * 1.616 + hr_val * 2.101 +
+                          (bb_val + hbp_val) * 0.690) / PA
+          
+          actual_wOBACON <- if (batted_balls_count > 0)
+            (singles_val * 0.888 + d_val * 1.271 +
+             t_val * 1.616 + hr_val * 2.101) / batted_balls_count
+          else NA_real_
+          
+          # Name parsing: PrestoSports uses "First Last" format
+          clean_name <- str_trim(str_replace_all(player_raw, "[^A-Za-z\\s\\-\\']", ""))
+          words <- str_trim(str_split(clean_name, "\\s+")[[1]])
+          words <- words[nchar(words) > 0]
+          
+          if (length(words) >= 2) {
+            first_initial <- toupper(substr(words[1], 1, 1))
+            last_name     <- toupper(paste(words[2:length(words)], collapse = " "))
+          } else if (length(words) == 1) {
+            first_initial <- "X"
+            last_name     <- toupper(words[1])
+          } else next
+          
+          composite_key <- create_composite_key(last_name, first_initial, team_abbrev, season)
+          
+          player_row <- data.frame(
+            Player_Name      = player_raw,
+            Last_Name        = last_name,
+            First_Initial    = first_initial,
+            Team             = team_name,
+            Team_Code        = team_code,
+            Team_Abbrev      = team_abbrev,
+            Season           = season,
+            AB               = ab_val,
+            H                = h_val,
+            Singles          = singles_val,
+            Doubles          = d_val,
+            Triples          = t_val,
+            HR               = hr_val,
+            BB               = bb_val,
+            HBP              = hbp_val,
+            SO               = k_val,
+            PA               = PA,
+            actual_wOBA      = round(actual_wOBA, 3),
+            actual_wOBACON   = round(actual_wOBACON, 3),
+            NECBL_Composite_Key = composite_key,
+            stringsAsFactors = FALSE
+          )
+          
+          team_stats <- rbind(team_stats, player_row)
+          
+        }, error = function(e) {
+          cat("Row error:", e$message, "\n")
+        })
+      }
+      
+      if (nrow(team_stats) > 0) {
+        cat("  Got", nrow(team_stats), "players from", team_name, "\n")
+        all_woba <- rbind(all_woba, team_stats)
+      }
+      
+      Sys.sleep(0.3)  # Be polite to PrestoSports server
+      
     }, error = function(e) {
-      cat("ERROR scraping", team_name, ":", e$message, "\n")
+      cat("Error scraping", team_name, ":", e$message, "\n")
     })
-    
-    Sys.sleep(1.5)
   }
   
-  # Final verification
-  if (nrow(all_woba) > 0) {
-    duplicate_keys <- all_woba %>%
-      group_by(Player_Team_Season_Key) %>%
-      filter(n() > 1) %>%
-      ungroup()
-    
-    if (nrow(duplicate_keys) > 0) {
-      cat("WARNING: Found", nrow(duplicate_keys), "duplicate composite keys - removing duplicates:\n")
-      all_woba <- all_woba %>%
-        group_by(Player_Team_Season_Key) %>%
-        slice_head(n = 1) %>%
-        ungroup()
-    }
-  }
-  
-  cat("Total players with calculated wOBA/wOBACON for", season, ":", nrow(all_woba), "\n")
+  cat("Total players scraped:", nrow(all_woba), "\n")
   return(all_woba)
 }
-# ===================================================================
-# SECTION 5: SIMPLIFIED MATCHING FUNCTION WITH COMPOSITE KEYS - SEASON-AWARE VERSION
-# ===================================================================
-
 # Helper function to create composite keys
 create_composite_key <- function(last_name, first_initial, team_abbrev, season) {
   paste(
@@ -1246,7 +1194,7 @@ create_composite_key <- function(last_name, first_initial, team_abbrev, season) 
 }
 
 # SIMPLIFIED MATCHING WITH ROBUST ERROR HANDLING
-match_necbl_data_composite <- function(expected_data, necbl_data, selected_season = "2025") {
+match_necbl_data_composite <- function(expected_data, necbl_data, selected_season = "2026") {
   cat("=== MATCHING WITH STANDARDIZED 'LASTNAME, F' FORMAT (BOTH SIDES) - SEASON-AWARE ===\n")
   cat("Expected records (PRIMARY):", nrow(expected_data), "\n")
   cat("NECBL records (OVERLAY):", nrow(necbl_data), "\n")
@@ -1696,8 +1644,8 @@ ui <- dashboardPage(
                   fluidRow(
                     column(3, 
                            selectInput("primary_season", "Primary Season:", 
-                                       choices = c("2025", "2024", "2023", "2022", "2021"), 
-                                       selected = "2025")
+                                       choices = c("2026", "2025", "2024", "2023", "2022", "2021"), 
+                                       selected = "2026")
                     ),
                     column(3, 
                            selectInput("season_scope", "Show Players:", 
