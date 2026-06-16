@@ -47,10 +47,13 @@ def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
     print(f"  Scraping {team_name} ({season})...", flush=True)
 
     try:
-        page.goto(url, wait_until="networkidle", timeout=30000)
-        # Wait for a table to appear
-        page.wait_for_selector("table", timeout=20000)
-        time.sleep(2)
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        # Wait for table with hitting data
+        try:
+            page.wait_for_selector("table", timeout=30000)
+        except PlaywrightTimeout:
+            pass  # Try parsing anyway
+        time.sleep(3)
     except PlaywrightTimeout:
         print(f"    Timeout for {team_name}", flush=True)
         return []
