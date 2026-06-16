@@ -97,29 +97,46 @@ tryCatch({
 })
 
 # ===================================================================
-# STEP 5: Load NECBL actual stats from necbl_stats.csv
-#         (written by scrape_necbl.py which runs before this script)
+# STEP 5: Load NECBL actual stats from Google Drive
+#         You run scrape_necbl_local.py locally, upload necbl_stats.csv
+#         to the NECBL Stats Drive folder, pipeline picks it up here.
 # ===================================================================
-cat("\n=== STEP 5: LOADING NECBL STATS FROM necbl_stats.csv ===\n")
+cat("\n=== STEP 5: LOADING NECBL STATS FROM GOOGLE DRIVE ===\n")
 necbl_stats_cache <- list()
 
-if (file.exists("necbl_stats.csv")) {
-  necbl_df <- tryCatch(
-    readr::read_csv("necbl_stats.csv", show_col_types = FALSE),
-    error = function(e) { cat("Error reading necbl_stats.csv:", e$message, "\n"); NULL }
-  )
-  if (!is.null(necbl_df) && nrow(necbl_df) > 0) {
-    for (season in unique(necbl_df$Season)) {
-      season_data <- necbl_df %>% filter(Season == season)
-      necbl_stats_cache[[as.character(season)]] <- season_data
-      cat("Cached", nrow(season_data), "players for", season, "\n")
+necbl_folder_id <- Sys.getenv("NECBL_STATS_FOLDER_ID", "")
+
+if (nchar(necbl_folder_id) > 0) {
+  tryCatch({
+    files <- googledrive::drive_ls(googledrive::as_id(necbl_folder_id))
+    csv_files <- files[grepl("necbl_stats.*\\.csv$", files$name, ignore.case = TRUE), ]
+    
+    if (nrow(csv_files) > 0) {
+      tmp_csv <- tempfile(fileext = ".csv")
+      googledrive::drive_download(
+        googledrive::as_id(csv_files$id[1]),
+        path = tmp_csv,
+        overwrite = TRUE
+      )
+      necbl_df <- readr::read_csv(tmp_csv, show_col_types = FALSE)
+      unlink(tmp_csv)
+      
+      if (!is.null(necbl_df) && nrow(necbl_df) > 0) {
+        for (season in unique(necbl_df$Season)) {
+          season_data <- necbl_df %>% filter(Season == as.character(season))
+          necbl_stats_cache[[as.character(season)]] <- season_data
+          cat("Cached", nrow(season_data), "players for", season, "\n")
+        }
+        cat("NECBL stats loaded for seasons:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
+      }
+    } else {
+      cat("No necbl_stats.csv found in NECBL Stats Drive folder\n")
     }
-    cat("NECBL stats loaded for seasons:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
-  } else {
-    cat("necbl_stats.csv is empty - no NECBL data cached\n")
-  }
+  }, error = function(e) {
+    cat("Error loading NECBL stats from Drive:", e$message, "\n")
+  })
 } else {
-  cat("necbl_stats.csv not found - no NECBL data cached\n")
+  cat("NECBL_STATS_FOLDER_ID not set - skipping NECBL stats\n")
 }
 
 # ===================================================================
