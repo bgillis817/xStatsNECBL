@@ -26,17 +26,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v4
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v5
           restore-keys: |
             ${{ runner.os }}-r-
 
-      - name: Install R dependencies (pipeline)
+      - name: Install R dependencies (pipeline + model)
         run: |
-          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive"), repos="https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret"), repos="https://cloud.r-project.org")'
 
       - name: Install R dependencies (app + deploy)
         run: |
-          Rscript -e 'install.packages(c("rsconnect","shiny","shinydashboard","DT","ggplot2","rvest","httr","xml2","caret","xgboost"), repos="https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("rsconnect","shiny","shinydashboard","DT","ggplot2","rvest","httr","xml2"), repos="https://cloud.r-project.org")'
 
       - name: Write Google service account key
         run: echo '${{ secrets.GDRIVE_SA_KEY }}' > service_account.json
@@ -53,7 +53,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add navs_all_data.rds xwoba_clean_data.rds file_manifest.rds
+          git add navs_all_data.rds xwoba_clean_data.rds file_manifest.rds xwoba_model.rds
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No data changes to commit."
