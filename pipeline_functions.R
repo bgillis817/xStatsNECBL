@@ -659,3 +659,140 @@ calculate_full_xwoba <- function(raw_data, model_results) {
   
   return(full_xwoba)
 }
+# ============================================================================
+#  calculate_enhanced_data: runs the full player-level xwOBA scoring block
+#  that app.R previously ran at startup. Called by pipeline_daily.R and
+#  cached in xwoba_model.rds so app.R just loads it instantly.
+# ============================================================================
+calculate_enhanced_data <- function(raw_data, ultimate_results) {
+  
+  library(dplyr)
+  library(lubridate)
+  
+  cat("\nCalculating player-level xwOBA scores...\n")
+  
+  # Season extraction
+  if ("Date" %in% names(raw_data)) {
+    raw_data <- raw_data %>%
+      mutate(Expected_Season = as.character(year(as.Date(Date))))
+    cat("Seasons found:", paste(unique(raw_data$Expected_Season), collapse = ", "), "\n")
+  } else {
+    raw_data <- raw_data %>% mutate(Expected_Season = "2025")
+  }
+  
+  # Filter to batted balls with tracking data
+  batted_balls <- raw_data %>%
+    filter(
+      PlayResult %in% c("Single","Double","Triple","HomeRun","Out","FieldersChoice","Error","Sacrifice") &
+        !is.na(ExitSpeed) & ExitSpeed > 0 & !is.na(Angle) & !is.na(Batter)
+    )
+  
+  # Outcome classification
+  batted_balls$outcome <- case_when(
+    batted_balls$PlayResult == "Single"   ~ "single",
+    batted_balls$PlayResult == "Double"   ~ "double",
+    batted_balls$PlayResult == "Triple"   ~ "triple",
+    batted_balls$PlayResult == "HomeRun"  ~ "home_run",
+    batted_balls$PlayResult %in% c("Out","FieldersChoice","Error","Sacrifice") ~ "out",
+    TRUE ~ "other"
+  )
+  batted_balls <- batted_balls[batted_balls$outcome != "other", ]
+  
+  # Use model predictions if available, otherwise EV/angle fallback
+  if (!is.null(ultimate_results) && !is.null(ultimate_results$model)) {
+    tryCatch({
+      model_env_funcs <- create_ultimate_features(batted_balls)
+      X_all <- model_env_funcs$features
+      dall  <- xgboost::xgb.DMatrix(data = as.matrix(X_all))
+      probs <- predict(ultimate_results$model, dall, reshape = TRUE)
+      woba_weights_vec <- c(0.000, 0.888, 1.271, 1.616, 2.101)
+      batted_balls$predicted_xwobacon <- as.vector(probs %*% woba_weights_vec)
+      cat("Used xgboost model predictions for", nrow(batted_balls), "batted balls\n")
+    }, error = function(e) {
+      cat("Model prediction failed (", e$message, ") - using EV/angle fallback\n")
+      batted_balls$predicted_xwobacon <<- pmin(2.5, pmax(0,
+        0.1 + (batted_balls$ExitSpeed - 60) * 0.01 +
+        pmax(0, 30 - abs(batted_balls$Angle - 20)) * 0.005
+      ))
+    })
+  } else {
+    batted_balls$predicted_xwobacon <- pmin(2.5, pmax(0,
+      0.1 + (batted_balls$ExitSpeed - 60) * 0.01 +
+      pmax(0, 30 - abs(batted_balls$Angle - 20)) * 0.005
+    ))
+  }
+  
+  cat("xwOBACON calculated for", nrow(batted_balls), "batted balls\n")
+  
+  # All plate appearances (includes walks, Ks, HBP)
+  all_pa <- raw_data %>%
+    filter(!is.na(Batter)) %>%
+    mutate(
+      pa_outcome = case_when(
+        PlayResult %in% c("Single","Double","Triple","HomeRun") ~ "hit",
+        PlayResult %in% c("Out","FieldersChoice","Error")       ~ "out",
+        PlayResult == "Sacrifice"                               ~ "sacrifice_fly",
+        KorBB == "Walk"                                         ~ "walk",
+        KorBB == "IntentionalWalk"                              ~ "intentional_walk",
+        PitchCall == "HitByPitch"                               ~ "hit_by_pitch",
+        KorBB %in% c("Strikeout","StrikeoutLooking","StrikeoutSwinging") ~ "strikeout",
+        TRUE ~ "other"
+      )
+    ) %>%
+    filter(pa_outcome != "other")
+  
+  cat("Total plate appearances:", nrow(all_pa), "\n")
+  
+  # Player-level xwOBA by season
+  player_xwoba_full <- all_pa %>%
+    left_join(
+      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon, Expected_Season),
+      by = c("Batter","Date","Inning","PAofInning")
+    ) %>%
+    mutate(Expected_Season = coalesce(Expected_Season.x, Expected_Season.y)) %>%
+    group_by(Batter, Expected_Season) %>%
+    summarise(
+      hits             = sum(pa_outcome == "hit"),
+      outs             = sum(pa_outcome == "out"),
+      strikeouts       = sum(pa_outcome == "strikeout"),
+      BB               = sum(pa_outcome == "walk"),
+      IBB              = sum(pa_outcome == "intentional_walk"),
+      SF               = sum(pa_outcome == "sacrifice_fly"),
+      HBP              = sum(pa_outcome == "hit_by_pitch"),
+      batted_balls_count = hits + outs,
+      AB               = hits + outs + strikeouts,
+      total_pa         = AB + BB - IBB + SF + HBP,
+      mean_xwobacon    = mean(predicted_xwobacon, na.rm = TRUE),
+      wBB_HBP          = 0.690,
+      xwoba_numerator  = (mean_xwobacon * batted_balls_count) + (wBB_HBP * (BB - IBB + HBP)),
+      predicted_xwoba_full = ifelse(total_pa > 0, xwoba_numerator / total_pa, NA_real_),
+      .groups = "drop"
+    )
+  
+  cat("xwOBA calculated for", nrow(player_xwoba_full), "player-season combinations\n")
+  cat("Walk check - total BB across all players:", sum(player_xwoba_full$BB), "\n")
+  
+  # Merge back to PA level
+  enhanced_data <- all_pa %>%
+    left_join(
+      batted_balls %>% select(Batter, Date, Inning, PAofInning, predicted_xwobacon),
+      by = c("Batter","Date","Inning","PAofInning")
+    ) %>%
+    left_join(
+      player_xwoba_full %>% select(Batter, Expected_Season, predicted_xwoba_full, mean_xwobacon),
+      by = c("Batter","Expected_Season")
+    ) %>%
+    mutate(
+      predicted_xwoba_final    = predicted_xwoba_full,
+      predicted_xwobacon_final = ifelse(!is.na(predicted_xwobacon), predicted_xwobacon, mean_xwobacon)
+    )
+  
+  cat("Enhanced data rows:", nrow(enhanced_data), "\n")
+  cat("Records with xwOBA:", sum(!is.na(enhanced_data$predicted_xwoba_final)), "\n")
+  
+  list(
+    enhanced_data      = enhanced_data,
+    player_xwoba_full  = player_xwoba_full,
+    batted_balls       = batted_balls
+  )
+}
