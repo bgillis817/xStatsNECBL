@@ -218,8 +218,7 @@ def main():
     from datetime import datetime
 
     current_year = str(datetime.now().year)
-    prev_year    = str(int(current_year) - 1)
-    seasons      = [current_year, prev_year]
+    seasons      = [str(y) for y in range(int(current_year), 2020, -1)]
 
     print(f"Scraping NECBL seasons: {seasons}", flush=True)
 
