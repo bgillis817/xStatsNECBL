@@ -1,15 +1,13 @@
 # ============================================================================
 #  xStatsNECBL - Daily Data Refresh Pipeline (incremental)
-#  Pulls new/changed CSVs from Google Drive, appends to navs_all_data.rds,
-#  trains xwOBA model, scores all players, scrapes NECBL actual stats from
-#  PrestoSports, caches everything in xwoba_model.rds so app.R loads
-#  instantly on startup with no live HTTP requests.
+#  NECBL actual stats scraped via Python/Selenium (see scrape_necbl.py)
+#  which runs before this script in GitHub Actions.
 # ============================================================================
 
 suppressPackageStartupMessages({
   if (!require(pacman)) install.packages("pacman")
   pacman::p_load(dplyr, readr, data.table, tidyr, lubridate, stringr,
-                 googledrive, xgboost, caret, httr, rvest)
+                 googledrive, xgboost, caret)
 })
 
 sa_path <- Sys.getenv("GDRIVE_SA_PATH", "service_account.json")
@@ -32,7 +30,7 @@ result <- combine_navs_csvs_incremental(
 )
 if (is.null(result$manifest)) stop("Pipeline aborted: could not list files")
 if (result$new_count == 0) {
-  cat("\nNo new files - retraining model on existing data.\n")
+  cat("No new files - retraining model on existing data.\n")
   new_data <- NULL
 } else {
   new_data <- result$new_data
@@ -93,50 +91,45 @@ tryCatch({
   cat("Model trained - correlation:", round(ultimate_results$correlation, 4), "\n")
   cat("Scoring player-level xwOBA...\n")
   scoring_result <- calculate_enhanced_data(combined_data, ultimate_results)
-  cat("Players scored:", nrow(scoring_result$player_xwoba_full), "player-season combinations\n")
+  cat("Players scored:", nrow(scoring_result$player_xwoba_full), "combinations\n")
 }, error = function(e) {
   cat("WARNING: Model training/scoring failed:", e$message, "\n")
 })
 
 # ===================================================================
-# STEP 5: Scrape NECBL actual stats from PrestoSports
+# STEP 5: Load NECBL actual stats from necbl_stats.csv
+#         (written by scrape_necbl.py which runs before this script)
 # ===================================================================
-cat("\n=== STEP 5: SCRAPING NECBL STATS FROM PRESTOSPORTS ===\n")
+cat("\n=== STEP 5: LOADING NECBL STATS FROM necbl_stats.csv ===\n")
 necbl_stats_cache <- list()
-current_year <- as.character(format(Sys.Date(), "%Y"))
-seasons_to_scrape <- c(current_year)
 
-# Also scrape previous season if it's early in the year
-if (as.numeric(format(Sys.Date(), "%m")) < 8) {
-  prev_year <- as.character(as.numeric(current_year) - 1)
-  seasons_to_scrape <- c(seasons_to_scrape, prev_year)
-}
-
-for (season in seasons_to_scrape) {
-  cat("Scraping", season, "season...\n")
-  tryCatch({
-    season_data <- get_necbl_woba_by_season(season)
-    if (!is.null(season_data) && nrow(season_data) > 0) {
-      necbl_stats_cache[[season]] <- season_data
+if (file.exists("necbl_stats.csv")) {
+  necbl_df <- tryCatch(
+    readr::read_csv("necbl_stats.csv", show_col_types = FALSE),
+    error = function(e) { cat("Error reading necbl_stats.csv:", e$message, "\n"); NULL }
+  )
+  if (!is.null(necbl_df) && nrow(necbl_df) > 0) {
+    for (season in unique(necbl_df$Season)) {
+      season_data <- necbl_df %>% filter(Season == season)
+      necbl_stats_cache[[as.character(season)]] <- season_data
       cat("Cached", nrow(season_data), "players for", season, "\n")
-    } else {
-      cat("No data for", season, "\n")
     }
-  }, error = function(e) {
-    cat("Error scraping", season, ":", e$message, "\n")
-  })
+    cat("NECBL stats loaded for seasons:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
+  } else {
+    cat("necbl_stats.csv is empty - no NECBL data cached\n")
+  }
+} else {
+  cat("necbl_stats.csv not found - no NECBL data cached\n")
 }
 
 # ===================================================================
-# STEP 6: Push to live Drive RDS
+# STEP 6: Push updated navs_all_data.rds to live Drive
 # ===================================================================
 cat("\n=== STEP 6: UPDATING SHARED GOOGLE DRIVE RDS ===\n")
 tryCatch({
   googledrive::drive_update(file = googledrive::as_id(LIVE_RDS_FILE_ID), media = "navs_all_data.rds")
   cat("Updated live Drive file\n")
-}, error = function(e) {
-  cat("WARNING:", e$message, "\n")
-})
+}, error = function(e) cat("WARNING:", e$message, "\n"))
 
 # ===================================================================
 # STEP 7: Save everything to xwoba_model.rds
@@ -153,8 +146,8 @@ saveRDS(
   ),
   "xwoba_model.rds"
 )
-cat("Saved xwoba_model.rds with NECBL stats for seasons:",
-    paste(names(necbl_stats_cache), collapse = ", "), "\n")
+cat("Saved xwoba_model.rds\n")
+cat("NECBL seasons cached:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
 
 # ===================================================================
 # STEP 8: Clean / standardize
@@ -169,4 +162,3 @@ if (!is.null(clean_data) && nrow(clean_data) > 0) {
 cat("\n=== PIPELINE COMPLETE ===\n")
 cat("New files processed:", result$new_count, "\n")
 cat("Total rows:", nrow(combined_data), "\n")
-cat("NECBL seasons cached:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
