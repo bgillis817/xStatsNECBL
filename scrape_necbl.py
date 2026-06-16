@@ -1,37 +1,29 @@
 """
-NECBL Hitting Stats Scraper
-Uses Selenium headless Chrome to scrape PrestoSports pages
-(which require JavaScript rendering).
-Outputs necbl_stats.csv with one row per player.
+NECBL Hitting Stats Scraper - Playwright version
+Playwright bundles its own Chromium so no Chrome/ChromeDriver mismatch issues.
 """
 
-import time
 import re
 import sys
+import time
 import pandas as pd
-from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+from datetime import datetime
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 TEAM_SLUGS = {
-    "UPP_VAL": ("Upper Valley Nighthawks",   "UPP", "uppervalleynighthawks"),
-    "VAL_BLU": ("Valley Blue Sox",            "VAL", "valleybluesox"),
-    "KEE_SWA": ("Keene Swampbats",            "KEE", "keeneswampbats"),
-    "BRI_B":   ("Bristol Blues",              "BRI", "bristolblues"),
-    "MAR_VIN": ("Martha's Vineyard Sharks",   "MAR", "marthasvineyardsharks"),
-    "OCE_STA": ("Ocean State Waves",          "OCE", "oceanstatewaves"),
-    "NOR_ADA": ("North Adams Steeplecats",    "NOR", "northadamssteeplecats"),
-    "MYS_SCH": ("Mystic Schooners",           "MYS", "mysticschooners"),
-    "NEW_GUL": ("Newport Gulls",              "NEW", "newportgulls"),
-    "SAN_MAI": ("Sanford Mainers",            "SAN", "sanfordmainers"),
-    "VER_MOU": ("Vermont Mountaineers",       "VER", "vermontmountaineers"),
-    "DAN_WES": ("Danbury Westerners",         "DAN", "danburywesterners"),
-    "NSN":     ("North Shore Navigators",     "NSN", "northshorenavigators"),
+    "UPP_VAL": ("Upper Valley Nighthawks",  "UPP", "uppervalleynighthawks"),
+    "VAL_BLU": ("Valley Blue Sox",           "VAL", "valleybluesox"),
+    "KEE_SWA": ("Keene Swampbats",           "KEE", "keeneswampbats"),
+    "BRI_B":   ("Bristol Blues",             "BRI", "bristolblues"),
+    "MAR_VIN": ("Martha's Vineyard Sharks",  "MAR", "marthasvineyardsharks"),
+    "OCE_STA": ("Ocean State Waves",         "OCE", "oceanstatewaves"),
+    "NOR_ADA": ("North Adams Steeplecats",   "NOR", "northadamssteeplecats"),
+    "MYS_SCH": ("Mystic Schooners",          "MYS", "mysticschooners"),
+    "NEW_GUL": ("Newport Gulls",             "NEW", "newportgulls"),
+    "SAN_MAI": ("Sanford Mainers",           "SAN", "sanfordmainers"),
+    "VER_MOU": ("Vermont Mountaineers",      "VER", "vermontmountaineers"),
+    "DAN_WES": ("Danbury Westerners",        "DAN", "danburywesterners"),
+    "NSN":     ("North Shore Navigators",    "NSN", "northshorenavigators"),
 }
 
 WOBA_WEIGHTS = {
@@ -42,42 +34,6 @@ WOBA_WEIGHTS = {
     "bb_hbp": 0.690,
 }
 
-def make_driver():
-    opts = Options()
-    opts.add_argument("--headless=new")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-extensions")
-    opts.add_argument("--disable-software-rasterizer")
-    opts.add_argument("--disable-background-networking")
-    opts.add_argument("--disable-default-apps")
-    opts.add_argument("--disable-sync")
-    opts.add_argument("--metrics-recording-only")
-    opts.add_argument("--mute-audio")
-    opts.add_argument("--no-first-run")
-    opts.add_argument("--safebrowsing-disable-auto-update")
-    opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--memory-pressure-off")
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-    from webdriver_manager.chrome import ChromeDriverManager
-    from selenium.webdriver.chrome.service import Service
-    import subprocess, os
-    # Use system chrome if available, otherwise let webdriver_manager find it
-    chrome_path = None
-    for path in ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser"]:
-        if os.path.exists(path):
-            chrome_path = path
-            break
-    if chrome_path:
-        opts.binary_location = chrome_path
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=opts)
-
-
 def safe_num(val, default=0):
     try:
         v = re.sub(r"[^0-9.]", "", str(val))
@@ -86,40 +42,28 @@ def safe_num(val, default=0):
         return default
 
 
-def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
-    url = (
-        f"https://www.necbl.com/sports/bsb/{season}"
-        f"/teams/{slug}?view=lineup"
-    )
+def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
+    url = f"https://www.necbl.com/sports/bsb/{season}/teams/{slug}?view=lineup"
     print(f"  Scraping {team_name} ({season})...", flush=True)
 
     try:
-        driver.get(url)
-        # Wait up to 20s for the hitting table to appear
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.TAG_NAME, "table"))
-        )
-        time.sleep(3)  # Extra wait for JS data population
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        # Wait for a table to appear
+        page.wait_for_selector("table", timeout=20000)
+        time.sleep(2)
+    except PlaywrightTimeout:
+        print(f"    Timeout for {team_name}", flush=True)
+        return []
     except Exception as e:
-        print(f"    Timeout/error loading {team_name}: {e}", flush=True)
-        # Retry once
-        try:
-            print(f"    Retrying {team_name}...", flush=True)
-            driver.get(url)
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.TAG_NAME, "table"))
-            )
-            time.sleep(3)
-        except Exception as e2:
-            print(f"    Retry failed: {e2}", flush=True)
-            return []
+        print(f"    Error loading {team_name}: {e}", flush=True)
+        return []
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    tables = soup.find_all("table")
-
+    # Get all tables from the page
+    tables = page.query_selector_all("table")
     hitting_tbl = None
+
     for tbl in tables:
-        headers = [th.get_text(strip=True).upper() for th in tbl.find_all("th")]
+        headers = [th.inner_text().strip().upper() for th in tbl.query_selector_all("th")]
         if "AB" in headers and "H" in headers:
             hitting_tbl = tbl
             break
@@ -128,7 +72,7 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
         print(f"    No hitting table found for {team_name}", flush=True)
         return []
 
-    headers = [th.get_text(strip=True).upper() for th in hitting_tbl.find_all("th")]
+    headers = [th.inner_text().strip().upper() for th in hitting_tbl.query_selector_all("th")]
 
     def col(name, *alts):
         for n in [name] + list(alts):
@@ -148,21 +92,21 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
     so_col   = col("K", "SO")
 
     if name_col is None or ab_col is None or h_col is None:
-        print(f"    Missing required columns for {team_name}. Headers: {headers}", flush=True)
+        print(f"    Missing required columns. Headers: {headers}", flush=True)
         return []
 
-    rows = hitting_tbl.find_all("tr")[1:]  # skip header
+    rows = hitting_tbl.query_selector_all("tr")
     players = []
 
-    for row in rows:
-        cells = row.find_all(["td", "th"])
+    for row in rows[1:]:  # skip header
+        cells = row.query_selector_all("td, th")
         if len(cells) < 3:
             continue
 
         def cell(idx):
             if idx is None or idx >= len(cells):
                 return ""
-            return cells[idx].get_text(strip=True)
+            return cells[idx].inner_text().strip()
 
         raw_name = cell(name_col)
         if not raw_name or len(raw_name) < 2:
@@ -170,7 +114,7 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
         if re.match(r"^(Total|Opponent|Name|Player|---)", raw_name, re.I):
             continue
 
-        ab_val  = safe_num(cell(ab_col))
+        ab_val = safe_num(cell(ab_col))
         if ab_val <= 0:
             continue
 
@@ -204,7 +148,6 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
             hr_val  * WOBA_WEIGHTS["hr"]
         ) / bip
 
-        # Name parsing: PrestoSports is "First Last"
         clean = re.sub(r"\s+", " ", raw_name).strip()
         parts = clean.split()
         if len(parts) >= 2:
@@ -219,27 +162,27 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
         composite_key = f"{last_name}_{first_initial}_{team_abbrev}_{season}"
 
         players.append({
-            "Player":                raw_name,
-            "Last_Name":             last_name,
-            "First_Initial":         first_initial,
-            "Team":                  team_name,
-            "Team_Code":             team_code,
-            "Team_Abbrev":           team_abbrev,
-            "Season":                season,
-            "AB":                    int(ab_val),
-            "H":                     int(h_val),
-            "Singles":               int(singles),
-            "Doubles":               int(d_val),
-            "Triples":               int(t_val),
-            "HR":                    int(hr_val),
-            "BB":                    int(bb_val),
-            "HBP":                   int(hbp_val),
-            "SO":                    int(so_val),
-            "PA":                    int(pa),
-            "Batted_Balls":          int(bip),
-            "wOBA":                  round(woba, 3),
-            "wOBACON":               round(wobacon, 3),
-            "Player_Team_Season_Key": composite_key,
+            "Player":                  raw_name,
+            "Last_Name":               last_name,
+            "First_Initial":           first_initial,
+            "Team":                    team_name,
+            "Team_Code":               team_code,
+            "Team_Abbrev":             team_abbrev,
+            "Season":                  season,
+            "AB":                      int(ab_val),
+            "H":                       int(h_val),
+            "Singles":                 int(singles),
+            "Doubles":                 int(d_val),
+            "Triples":                 int(t_val),
+            "HR":                      int(hr_val),
+            "BB":                      int(bb_val),
+            "HBP":                     int(hbp_val),
+            "SO":                      int(so_val),
+            "PA":                      int(pa),
+            "Batted_Balls":            int(bip),
+            "wOBA":                    round(woba, 3),
+            "wOBACON":                 round(wobacon, 3),
+            "Player_Team_Season_Key":  composite_key,
         })
 
     print(f"    Got {len(players)} players", flush=True)
@@ -247,33 +190,38 @@ def scrape_team(driver, season, team_code, team_name, team_abbrev, slug):
 
 
 def main():
-    import os
-    from datetime import datetime
-
     current_year = str(datetime.now().year)
-    seasons      = [str(y) for y in range(int(current_year), 2020, -1)]
-
+    seasons = [str(y) for y in range(int(current_year), 2020, -1)]
     print(f"Scraping NECBL seasons: {seasons}", flush=True)
-
 
     all_rows = []
 
-    for season in seasons:
-        print(f"\n=== Season {season} ===", flush=True)
-        for code, (name, abbrev, slug) in TEAM_SLUGS.items():
-            # Fresh driver per team - prevents one crash cascading to others
-            driver = make_driver()
-            try:
-                rows = scrape_team(driver, season, code, name, abbrev, slug)
-                all_rows.extend(rows)
-            except Exception as e:
-                print(f"    Driver-level error for {name}: {e}", flush=True)
-            finally:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+        )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        )
+        page = context.new_page()
+
+        for season in seasons:
+            print(f"\n=== Season {season} ===", flush=True)
+            for code, (name, abbrev, slug) in TEAM_SLUGS.items():
                 try:
-                    driver.quit()
-                except:
-                    pass
-            time.sleep(1)
+                    rows = scrape_team(page, season, code, name, abbrev, slug)
+                    all_rows.extend(rows)
+                except Exception as e:
+                    print(f"    Unexpected error for {name}: {e}", flush=True)
+                time.sleep(0.5)
+
+        browser.close()
+
     if all_rows:
         df = pd.DataFrame(all_rows)
         df.to_csv("necbl_stats.csv", index=False)
@@ -281,7 +229,6 @@ def main():
         print(f"Seasons: {df['Season'].unique().tolist()}", flush=True)
         print(f"Teams:   {df['Team_Code'].nunique()} teams", flush=True)
     else:
-        # Write empty CSV so pipeline doesn't crash
         pd.DataFrame(columns=[
             "Player","Last_Name","First_Initial","Team","Team_Code",
             "Team_Abbrev","Season","AB","H","Singles","Doubles","Triples",
