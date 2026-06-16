@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v5
+          key: ${{ runner.os }}-r-${{ hashFiles('**/pipeline_daily.R') }}-v6
           restore-keys: |
             ${{ runner.os }}-r-
 
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install R dependencies (app + deploy)
         run: |
-          Rscript -e 'install.packages(c("rsconnect","shiny","shinydashboard","DT","ggplot2","rvest","httr","xml2"), repos="https://cloud.r-project.org")'
+          Rscript -e 'install.packages(c("rsconnect","shiny","shinydashboard","DT","ggplot2","rvest","httr","xml2","plotly","viridis","gridExtra","lubridate","scales","jsonlite"), repos="https://cloud.r-project.org")'
 
       - name: Write Google service account key
         run: echo '${{ secrets.GDRIVE_SA_KEY }}' > service_account.json
