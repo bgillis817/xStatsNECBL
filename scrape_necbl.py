@@ -1,14 +1,30 @@
 """
-NECBL Hitting Stats Scraper - Playwright version
-Playwright bundles its own Chromium so no Chrome/ChromeDriver mismatch issues.
+NECBL Hitting Stats Scraper
+Uses the PrestoSports static monospace print template which returns
+plain HTML with no JavaScript required.
+URL: https://newenglandcollegiateleague.prestosports.com/sports/bsb/YEAR/teams/SLUG
+     ?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h
 """
 
 import re
 import sys
 import time
+import requests
 import pandas as pd
+from bs4 import BeautifulSoup
 from datetime import datetime
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+BASE = "https://newenglandcollegiateleague.prestosports.com"
 
 TEAM_SLUGS = {
     "UPP_VAL": ("Upper Valley Nighthawks",  "UPP", "uppervalleynighthawks"),
@@ -36,53 +52,43 @@ WOBA_WEIGHTS = {
 
 def safe_num(val, default=0):
     try:
-        v = re.sub(r"[^0-9.]", "", str(val))
+        v = re.sub(r"[^0-9.]", "", str(val).strip())
         return float(v) if v else default
     except:
         return default
 
 
-def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
-    url = f"https://www.necbl.com/sports/bsb/{season}/teams/{slug}?view=lineup"
+def scrape_team(session, season, team_code, team_name, team_abbrev, slug):
+    url = (
+        f"{BASE}/sports/bsb/{season}/teams/{slug}"
+        f"?tmpl=teaminfo-network-monospace-template&sort=ab&pos=h"
+    )
     print(f"  Scraping {team_name} ({season})...", flush=True)
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        # Wait for the hitting stats table - look for a th containing AB
-        try:
-            page.wait_for_selector("th:has-text('AB')", timeout=30000)
-        except PlaywrightTimeout:
-            # Try scrolling to trigger lazy load
-            try:
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(2)
-                page.wait_for_selector("th:has-text('AB')", timeout=15000)
-            except PlaywrightTimeout:
-                print(f"    No AB column found after scroll for {team_name}", flush=True)
-                return []
-        time.sleep(1)
-    except PlaywrightTimeout:
-        print(f"    Timeout for {team_name}", flush=True)
-        return []
+        resp = session.get(url, headers=HEADERS, timeout=20)
+        if resp.status_code != 200:
+            print(f"    HTTP {resp.status_code} - skipping", flush=True)
+            return []
     except Exception as e:
-        print(f"    Error loading {team_name}: {e}", flush=True)
+        print(f"    Request error: {e}", flush=True)
         return []
 
-    # Get all tables from the page
-    tables = page.query_selector_all("table")
-    hitting_tbl = None
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tables = soup.find_all("table")
 
+    hitting_tbl = None
     for tbl in tables:
-        headers = [th.inner_text().strip().upper() for th in tbl.query_selector_all("th")]
-        if "AB" in headers and "H" in headers:
+        headers = [th.get_text(strip=True).upper() for th in tbl.find_all("th")]
+        if "AB (AT BATS)" in headers or "AB" in headers:
             hitting_tbl = tbl
             break
 
     if hitting_tbl is None:
-        print(f"    No hitting table found for {team_name}", flush=True)
+        print(f"    No hitting table found", flush=True)
         return []
 
-    headers = [th.inner_text().strip().upper() for th in hitting_tbl.query_selector_all("th")]
+    headers = [th.get_text(strip=True).upper() for th in hitting_tbl.find_all("th")]
 
     def col(name, *alts):
         for n in [name] + list(alts):
@@ -91,37 +97,40 @@ def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
                     return i
         return None
 
-    name_col = col("NAME", "PLAYER")
+    name_col = col("PLAYER", "NAME")
     ab_col   = col("AB")
-    h_col    = col("H")
+    h_col    = col("H (HITS)", "H")
     d_col    = col("2B")
     t_col    = col("3B")
     hr_col   = col("HR")
     bb_col   = col("BB")
     hbp_col  = col("HBP")
-    so_col   = col("K", "SO")
+    so_col   = col("SO", "K")
 
     if name_col is None or ab_col is None or h_col is None:
-        print(f"    Missing required columns. Headers: {headers}", flush=True)
+        print(f"    Missing columns. Headers: {headers[:10]}", flush=True)
         return []
 
-    rows = hitting_tbl.query_selector_all("tr")
+    rows = hitting_tbl.find_all("tr")[1:]  # skip header
     players = []
 
-    for row in rows[1:]:  # skip header
-        cells = row.query_selector_all("td, th")
+    for row in rows:
+        cells = row.find_all(["td", "th"])
         if len(cells) < 3:
             continue
 
         def cell(idx):
             if idx is None or idx >= len(cells):
                 return ""
-            return cells[idx].inner_text().strip()
+            return cells[idx].get_text(strip=True)
 
         raw_name = cell(name_col)
+        # Strip trailing dots used for monospace padding
+        raw_name = re.sub(r"\.+$", "", raw_name).strip()
+
         if not raw_name or len(raw_name) < 2:
             continue
-        if re.match(r"^(Total|Opponent|Name|Player|---)", raw_name, re.I):
+        if re.match(r"^(Total|Opponent|Name|Player|---|#)", raw_name, re.I):
             continue
 
         ab_val = safe_num(cell(ab_col))
@@ -158,6 +167,7 @@ def scrape_team(page, season, team_code, team_name, team_abbrev, slug):
             hr_val  * WOBA_WEIGHTS["hr"]
         ) / bip
 
+        # PrestoSports monospace template: "First Last......."
         clean = re.sub(r"\s+", " ", raw_name).strip()
         parts = clean.split()
         if len(parts) >= 2:
@@ -205,38 +215,20 @@ def main():
     print(f"Scraping NECBL seasons: {seasons}", flush=True)
 
     all_rows = []
+    session = requests.Session()
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-        )
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        )
-        page = context.new_page()
-
-        for season in seasons:
-            print(f"\n=== Season {season} ===", flush=True)
-            for code, (name, abbrev, slug) in TEAM_SLUGS.items():
-                try:
-                    rows = scrape_team(page, season, code, name, abbrev, slug)
-                    all_rows.extend(rows)
-                except Exception as e:
-                    print(f"    Unexpected error for {name}: {e}", flush=True)
-                time.sleep(0.5)
-
-        browser.close()
+    for season in seasons:
+        print(f"\n=== Season {season} ===", flush=True)
+        for code, (name, abbrev, slug) in TEAM_SLUGS.items():
+            rows = scrape_team(session, season, code, name, abbrev, slug)
+            all_rows.extend(rows)
+            time.sleep(0.5)
 
     if all_rows:
         df = pd.DataFrame(all_rows)
         df.to_csv("necbl_stats.csv", index=False)
         print(f"\nSaved necbl_stats.csv with {len(df)} rows", flush=True)
-        print(f"Seasons: {df['Season'].unique().tolist()}", flush=True)
+        print(f"Seasons: {sorted(df['Season'].unique().tolist(), reverse=True)}", flush=True)
         print(f"Teams:   {df['Team_Code'].nunique()} teams", flush=True)
     else:
         pd.DataFrame(columns=[
