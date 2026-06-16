@@ -1114,3 +1114,7 @@ get_necbl_woba_by_season <- function(season = "2026") {
       cat("  Error:", e$message, "\n")
     })
   }
+
+  cat("Total players scraped:", nrow(all_woba), "\n")
+  return(all_woba)
+}
