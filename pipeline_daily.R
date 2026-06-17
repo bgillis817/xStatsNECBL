@@ -70,6 +70,31 @@ if (!is.null(new_data) && nrow(new_data) > 0) {
 cat("Total combined rows:", nrow(combined_data), "\n")
 
 # ===================================================================
+# STEP 2b: Shift KorBB walks/strikeouts into PlayResult
+# Walk rows in Trackman have KorBB="Walk" but PlayResult is blank/NA
+# This ensures calculate_expected_xwoba_and_full counts them correctly
+# ===================================================================
+cat("\n=== STEP 2b: SHIFTING KorBB TO PlayResult ===\n")
+if ("KorBB" %in% names(combined_data) && "PlayResult" %in% names(combined_data)) {
+  before_walks <- sum(combined_data$KorBB == "Walk", na.rm = TRUE)
+  combined_data <- combined_data %>%
+    mutate(
+      PlayResult = case_when(
+        KorBB == "Walk" & (is.na(PlayResult) | PlayResult == "" | PlayResult == "Undefined") ~ "Walk",
+        KorBB == "IntentionalWalk" & (is.na(PlayResult) | PlayResult == "" | PlayResult == "Undefined") ~ "Walk",
+        KorBB %in% c("Strikeout","StrikeoutLooking","StrikeoutSwinging") & 
+          (is.na(PlayResult) | PlayResult == "" | PlayResult == "Undefined") ~ "Strikeout",
+        PitchCall == "HitByPitch" & (is.na(PlayResult) | PlayResult == "" | PlayResult == "Undefined") ~ "HitByPitch",
+        TRUE ~ PlayResult
+      )
+    )
+  after_walks <- sum(combined_data$PlayResult == "Walk", na.rm = TRUE)
+  after_ks <- sum(combined_data$PlayResult == "Strikeout", na.rm = TRUE)
+  cat("Walks in PlayResult:", after_walks, "\n")
+  cat("Strikeouts in PlayResult:", after_ks, "\n")
+}
+
+# ===================================================================
 # STEP 3: Save navs_all_data.rds + manifest
 # ===================================================================
 cat("\n=== STEP 3: SAVING navs_all_data.rds ===\n")
