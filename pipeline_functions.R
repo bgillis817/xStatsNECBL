@@ -36,7 +36,8 @@ combine_navs_csvs_by_id <- function(folder_id) {
       current_data <- read_csv(temp_file, show_col_types = FALSE)
       
       essential_columns <- c("Batter", "BatterTeam", "Date", "Inning", "PAofInning", 
-                             "ExitSpeed", "Angle", "PlayResult", "Bearing", "KorBB", "PitchCall")
+                             "ExitSpeed", "Angle", "PlayResult", "Bearing", "KorBB", "PitchCall",
+                             "BatterSide", "PitcherThrows", "TaggedPitchType", "AutoPitchType")
       available_columns <- intersect(essential_columns, names(current_data))
       current_data <- current_data %>% select(all_of(available_columns))
       cat("  Filtered to", ncol(current_data), "essential columns\n")
@@ -145,7 +146,8 @@ combine_navs_csvs_incremental <- function(folder_id, manifest_path = "file_manif
       current_data <- read_csv(temp_file, show_col_types = FALSE)
       
       essential_columns <- c("Batter", "BatterTeam", "Date", "Inning", "PAofInning",
-                             "ExitSpeed", "Angle", "PlayResult", "Bearing", "KorBB", "PitchCall")
+                             "ExitSpeed", "Angle", "PlayResult", "Bearing", "KorBB", "PitchCall",
+                             "BatterSide", "PitcherThrows", "TaggedPitchType", "AutoPitchType")
       available_columns <- intersect(essential_columns, names(current_data))
       current_data <- current_data %>% select(all_of(available_columns))
       
