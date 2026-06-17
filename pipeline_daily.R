@@ -58,26 +58,9 @@ if (!is.null(new_data) && nrow(new_data) > 0) {
     for (col in setdiff(all_cols, names(new_data)))      new_data[[col]] <- NA
   }
   combined_data <- bind_rows(existing_data, new_data)
-  # Keep only outcome rows — the final pitch of each PA
-  # Outcome rows: batted balls (have ExitSpeed), walks, strikeouts, HBP
-  # This ensures each PA is represented exactly once with its result
-  if ("PlayResult" %in% names(combined_data)) {
-    before <- nrow(combined_data)
-    combined_data <- combined_data %>%
-      filter(
-        # Batted balls
-        (!is.na(ExitSpeed) & ExitSpeed > 0) |
-        # Walks and intentional walks
-        (!is.na(KorBB) & KorBB %in% c("Walk", "IntentionalWalk")) |
-        # Strikeouts
-        (!is.na(KorBB) & KorBB %in% c("Strikeout", "StrikeoutLooking", "StrikeoutSwinging")) |
-        # HBP
-        (!is.na(PitchCall) & PitchCall == "HitByPitch") |
-        # PlayResult already set (from Step 2b)
-        (!is.na(PlayResult) & !PlayResult %in% c("", "Undefined"))
-      )
-    cat("Filtered to outcome rows:", before, "->", nrow(combined_data), "rows\n")
-  }
+  # No deduplication — keep all pitch rows like the original pipeline
+  # PA counting is handled by calculate_expected_xwoba_and_full via pa_outcome filtering
+  cat("Keeping all", nrow(combined_data), "rows (no deduplication)\n")
 } else {
   combined_data <- existing_data
 }
