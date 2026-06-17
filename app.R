@@ -1777,7 +1777,8 @@ ui <- dashboardPage(
       menuItem("Underperformers", tabName = "underperform", icon = icon("arrow-down")),
       menuItem("Overperformers", tabName = "overperform", icon = icon("arrow-up")),
       menuItem("Player Comparison", tabName = "comparison", icon = icon("balance-scale")),
-      menuItem("Team Browser", tabName = "browser", icon = icon("table"))
+      menuItem("Team Browser", tabName = "browser", icon = icon("table")),
+      menuItem("Splits", tabName = "splits", icon = icon("cut"))
     )
   ),
   
@@ -1952,6 +1953,47 @@ ui <- dashboardPage(
                 box(
                   title = "Team & Player Browser", status = "primary", solidHeader = TRUE, width = 12,
                   DT::dataTableOutput("browser_table")
+                )
+              )
+      )
+      # Splits Tab
+      tabItem(tabName = "splits",
+              fluidRow(
+                box(
+                  title = "Splits Controls", status = "primary", solidHeader = TRUE, width = 12,
+                  fluidRow(
+                    column(3, selectInput("splits_season", "Season:",
+                                         choices = c("2026","2025","2024","2023","2022","2021"),
+                                         selected = "2026")),
+                    column(3, selectInput("splits_team", "Team:",
+                                         choices = c("All Teams" = "All"))),
+                    column(3, selectInput("splits_batter_hand", "Batter Handedness:",
+                                         choices = c("All" = "All", "RHH" = "Right", "LHH" = "Left"))),
+                    column(3, selectInput("splits_pitcher_hand", "Pitcher Handedness:",
+                                         choices = c("All" = "All", "vs RHP" = "Right", "vs LHP" = "Left")))
+                  ),
+                  fluidRow(
+                    column(3, selectInput("splits_pitch_type", "Pitch Type:",
+                                         choices = c("All" = "All",
+                                                     "Fastball" = "Fastball",
+                                                     "Sinker" = "Sinker",
+                                                     "Cutter" = "Cutter",
+                                                     "Slider" = "Slider",
+                                                     "Curveball" = "Curveball",
+                                                     "Changeup" = "Changeup",
+                                                     "Splitter" = "Splitter",
+                                                     "Other" = "Other"))),
+                    column(3, selectInput("splits_min_bip", "Min Batted Balls:",
+                                         choices = c("All" = 0, "5+" = 5, "10+" = 10, "20+" = 20),
+                                         selected = 5)),
+                    column(6)
+                  )
+                )
+              ),
+              fluidRow(
+                box(
+                  title = "Player Splits - xwOBA & xwOBACON", status = "primary", solidHeader = TRUE, width = 12,
+                  DT::dataTableOutput("splits_table")
                 )
               )
       )
@@ -2476,6 +2518,131 @@ server <- function(input, output, session) {
       rownames = FALSE
     ) %>%
       formatRound(columns = c('Avg_xwOBA', 'Avg_wOBA', 'Avg_xwOBACON', 'Avg_wOBACON', 'wOBA_Gap', 'wOBACON_Gap'), digits = 3)
+  })
+  
+  # Splits tab — purely Trackman based, no NECBL matching needed
+  output$splits_table <- DT::renderDataTable({
+    
+    splits_data <- raw_data %>%
+      filter(!is.na(Batter), !is.na(ExitSpeed), ExitSpeed > 0, !is.na(Angle)) %>%
+      filter(PlayResult %in% c("Single","Double","Triple","HomeRun","Out","FieldersChoice","Error","Sacrifice"))
+    
+    # Season filter
+    if ("Date" %in% names(splits_data)) {
+      splits_data <- splits_data %>%
+        mutate(Season = as.character(format(as.Date(Date), "%Y"))) %>%
+        filter(Season == input$splits_season)
+    }
+    
+    # Team filter
+    if (!is.null(input$splits_team) && input$splits_team != "All") {
+      splits_data <- splits_data %>% filter(BatterTeam == input$splits_team)
+    }
+    
+    # Batter handedness filter
+    if (!is.null(input$splits_batter_hand) && input$splits_batter_hand != "All" &&
+        "BatterSide" %in% names(splits_data)) {
+      splits_data <- splits_data %>% filter(BatterSide == input$splits_batter_hand)
+    }
+    
+    # Pitcher handedness filter
+    if (!is.null(input$splits_pitcher_hand) && input$splits_pitcher_hand != "All" &&
+        "PitcherThrows" %in% names(splits_data)) {
+      splits_data <- splits_data %>% filter(PitcherThrows == input$splits_pitcher_hand)
+    }
+    
+    # Pitch type filter
+    if (!is.null(input$splits_pitch_type) && input$splits_pitch_type != "All") {
+      pitch_col <- if ("TaggedPitchType" %in% names(splits_data)) "TaggedPitchType" else "AutoPitchType"
+      if (pitch_col %in% names(splits_data)) {
+        if (input$splits_pitch_type == "Other") {
+          splits_data <- splits_data %>%
+            filter(!.data[[pitch_col]] %in% c("Fastball","Sinker","Cutter","Slider","Curveball","Changeup","Splitter"))
+        } else {
+          splits_data <- splits_data %>% filter(.data[[pitch_col]] == input$splits_pitch_type)
+        }
+      }
+    }
+    
+    if (nrow(splits_data) == 0) return(data.frame())
+    
+    # Outcome classification
+    splits_data <- splits_data %>%
+      mutate(outcome = case_when(
+        PlayResult == "Single"   ~ "single",
+        PlayResult == "Double"   ~ "double",
+        PlayResult == "Triple"   ~ "triple",
+        PlayResult == "HomeRun"  ~ "home_run",
+        TRUE                     ~ "out"
+      ))
+    
+    # Score using the pre-trained model from xwoba_model.rds
+    if (file.exists("xwoba_model.rds")) {
+      model_cache <- readRDS("xwoba_model.rds")
+      if (!is.null(model_cache$ultimate_results) && !is.null(model_cache$ultimate_results$model)) {
+        xgb_model <- model_cache$ultimate_results$model
+        feature_result <- create_ultimate_features(splits_data)
+        feat_matrix <- as.matrix(feature_result$features)
+        probs <- predict(xgb_model, xgb.DMatrix(feat_matrix), reshape = TRUE)
+        woba_vec <- c(0.000, 0.888, 1.271, 1.616, 2.101)
+        splits_data$predicted_xwobacon <- as.vector(probs %*% woba_vec)
+      } else {
+        splits_data$predicted_xwobacon <- pmin(2.5, pmax(0,
+          0.1 + (splits_data$ExitSpeed - 60) * 0.01 +
+          pmax(0, 30 - abs(splits_data$Angle - 20)) * 0.005))
+      }
+    } else {
+      splits_data$predicted_xwobacon <- pmin(2.5, pmax(0,
+        0.1 + (splits_data$ExitSpeed - 60) * 0.01 +
+        pmax(0, 30 - abs(splits_data$Angle - 20)) * 0.005))
+    }
+    
+    # Calculate actual wOBACON
+    splits_data <- splits_data %>%
+      mutate(actual_wobacon = case_when(
+        outcome == "single"   ~ 0.888,
+        outcome == "double"   ~ 1.271,
+        outcome == "triple"   ~ 1.616,
+        outcome == "home_run" ~ 2.101,
+        TRUE                  ~ 0.000
+      ))
+    
+    # Aggregate by player
+    min_bip <- as.numeric(input$splits_min_bip)
+    
+    result <- splits_data %>%
+      group_by(Batter, BatterTeam) %>%
+      summarise(
+        BIP        = n(),
+        xwOBACON   = round(mean(predicted_xwobacon, na.rm = TRUE), 3),
+        wOBACON    = round(mean(actual_wobacon, na.rm = TRUE), 3),
+        Diff       = round(mean(predicted_xwobacon, na.rm = TRUE) - mean(actual_wobacon, na.rm = TRUE), 3),
+        HR_rate    = round(mean(outcome == "home_run"), 3),
+        Hit_rate   = round(mean(outcome != "out"), 3),
+        Avg_EV     = round(mean(ExitSpeed, na.rm = TRUE), 1),
+        Avg_LA     = round(mean(Angle, na.rm = TRUE), 1),
+        .groups = "drop"
+      ) %>%
+      filter(BIP >= min_bip) %>%
+      arrange(desc(xwOBACON))
+    
+    # Update team choices dynamically
+    updateSelectInput(session, "splits_team",
+                      choices = c("All Teams" = "All", sort(unique(raw_data$BatterTeam))))
+    
+    DT::datatable(
+      result,
+      options = list(pageLength = 25, scrollX = TRUE),
+      caption = paste("Splits —", input$splits_season,
+                      if(input$splits_batter_hand != "All") paste("|", input$splits_batter_hand),
+                      if(input$splits_pitcher_hand != "All") paste("|", input$splits_pitcher_hand),
+                      if(input$splits_pitch_type != "All") paste("|", input$splits_pitch_type)),
+      rownames = FALSE
+    ) %>%
+      formatRound(columns = c("xwOBACON","wOBACON","Diff","HR_rate","Hit_rate","Avg_EV","Avg_LA"), digits = 3) %>%
+      formatStyle("Diff",
+                  backgroundColor = styleInterval(c(-0.025, 0.025),
+                                                  c("#f8d7da","#ffffff","#d4edda")))
   })
   
 }
