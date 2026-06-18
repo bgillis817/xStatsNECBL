@@ -2028,7 +2028,7 @@ server <- function(input, output, session) {
     if (pa_threshold > 0) {
       current_data <- current_data %>%
         group_by(Batter) %>%
-        filter(n() >= pa_threshold) %>%
+        filter(n_distinct(paste(Date, Inning, PAofInning)) >= pa_threshold) %>%
         ungroup()
     }
     
@@ -2179,9 +2179,9 @@ server <- function(input, output, session) {
         wOBA = mean(actual_woba_final, na.rm = TRUE),
         xwOBACON = mean(predicted_xwobacon_final, na.rm = TRUE),
         wOBACON = mean(actual_wobacon_final, na.rm = TRUE),
-        PA_Count = n(),
+        PA_Count = n_distinct(paste(Date, Inning, PAofInning)),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       )
     
@@ -2257,7 +2257,7 @@ server <- function(input, output, session) {
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       ) %>%
       mutate(
@@ -2291,7 +2291,7 @@ server <- function(input, output, session) {
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       ) %>%
       mutate(
@@ -2325,7 +2325,7 @@ server <- function(input, output, session) {
         xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
         wOBACON = round(mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       ) %>%
       mutate(
@@ -2357,7 +2357,7 @@ server <- function(input, output, session) {
     
     comparison_data <- current_data %>%
       filter(Batter %in% c(input$comp_player1, input$comp_player2)) %>%
-      arrange(if("Date" %in% names(.)) Date else row_number()) %>%
+      arrange(if("Date" %in% names(.)) .data[["Date"]] else row_number()) %>%
       group_by(Batter) %>%
       mutate(
         PA_Number = row_number(),
@@ -2426,7 +2426,7 @@ server <- function(input, output, session) {
         wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
         wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       )
     
@@ -2456,7 +2456,7 @@ server <- function(input, output, session) {
     browser_data <- current_data %>%
       group_by(Batter) %>%
       summarise(
-        PA_Count = n(),
+        PA_Count = n_distinct(paste(Date, Inning, PAofInning)),
         Avg_xwOBA = round(mean(predicted_xwoba_final, na.rm = TRUE), 3),
         Avg_wOBA = round(mean(actual_woba_final, na.rm = TRUE), 3),
         Avg_xwOBACON = round(mean(predicted_xwobacon_final, na.rm = TRUE), 3),
@@ -2464,7 +2464,7 @@ server <- function(input, output, session) {
         wOBA_Gap = round(mean(predicted_xwoba_final, na.rm = TRUE) - mean(actual_woba_final, na.rm = TRUE), 3),
         wOBACON_Gap = round(mean(predicted_xwobacon_final, na.rm = TRUE) - mean(actual_wobacon_final, na.rm = TRUE), 3),
         Team = first(BatterTeam),
-        Season = if("Expected_Season" %in% names(current_data)) first(Expected_Season) else input$primary_season,
+        Season = ifelse("Expected_Season" %in% names(current_data), first(Expected_Season), input$primary_season),
         .groups = "drop"
       ) %>%
       arrange(desc(!!sym(input$browser_sort)))
