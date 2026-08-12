@@ -189,6 +189,31 @@ cat("Saved xwoba_model.rds\n")
 cat("NECBL seasons cached:", paste(names(necbl_stats_cache), collapse = ", "), "\n")
 
 # ===================================================================
+# STEP 7b: Export a SMALL player-level xwOBA CSV for other apps to join.
+# The full model is 55 MB; downstream dashboards only need the per-player
+# table (name + season + xwOBA + xwOBACON). Keyed on Batter + Expected_Season,
+# which match the NECBL dashboard's Batter/season fields exactly.
+# ===================================================================
+if (!is.null(scoring_result) &&
+    !is.null(scoring_result$player_xwoba_full) &&
+    nrow(scoring_result$player_xwoba_full) > 0) {
+  player_export <- scoring_result$player_xwoba_full %>%
+    dplyr::transmute(
+      Batter,
+      Season       = Expected_Season,
+      PA           = total_pa,
+      AB,
+      BBE          = batted_balls_count,
+      xwOBA        = round(predicted_xwoba_full, 3),
+      xwOBACON     = round(mean_xwobacon, 3)
+    ) %>%
+    dplyr::filter(!is.na(xwOBA)) %>%
+    dplyr::arrange(dplyr::desc(xwOBA))
+  utils::write.csv(player_export, "player_xwoba.csv", row.names = FALSE)
+  cat("Saved player_xwoba.csv with", nrow(player_export), "player-seasons\n")
+}
+
+# ===================================================================
 # STEP 8: Clean / standardize
 # ===================================================================
 cat("\n=== STEP 8: CLEANING / STANDARDIZING ===\n")
