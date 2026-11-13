@@ -946,13 +946,14 @@ calculate_expected_xwoba_and_full <- function(raw_data, xgb_expected = NULL) {
 
 # Run the complete model
 # Load pre-trained model results from pipeline (avoids retraining on startup)
-if (file.exists("xwoba_model.rds")) {
+model_cache <- if (file.exists("xwoba_model.rds")) readRDS("xwoba_model.rds") else NULL
+
+if (!is.null(model_cache$ultimate_results) && is.numeric(model_cache$full_xwoba_result)) {
   cat("\nLoading pre-trained xwOBA model from xwoba_model.rds...\n")
-  model_cache <- readRDS("xwoba_model.rds")
   ultimate_results   <- model_cache$ultimate_results
   full_xwoba_result  <- model_cache$full_xwoba_result
 } else {
-  cat("\nNo cached model found - training now (this will take a moment)...\n")
+  cat("\nNo valid cached model found - training now (this will take a moment)...\n")
   ultimate_results   <- train_maximum_correlation_xwoba(raw_data)
   full_xwoba_result  <- calculate_full_xwoba(raw_data, ultimate_results)
   saveRDS(list(ultimate_results = ultimate_results,
@@ -1696,8 +1697,14 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
 initialize_enhanced_data_composite <- function() {
   cat("=== INITIALIZING ENHANCED DATA WITH COMPOSITE KEY SUPPORT ===\n")
   
-  # Try to use your existing data - check multiple possible names
-  if (exists("pipeline_results") && is.data.frame(pipeline_results) && nrow(pipeline_results) > 0) {
+  # Use the pre-computed enhanced_data from xwoba_model.rds when available
+  # (avoids re-scoring every row for every session, which ran the app out of memory)
+  if (exists("enhanced_data") && is.data.frame(enhanced_data) && nrow(enhanced_data) > 0 &&
+      "predicted_xwoba_final" %in% names(enhanced_data)) {
+    cat("✅ Using pre-computed enhanced_data from xwoba_model.rds\n")
+    base_data <- enhanced_data
+
+  } else if (exists("pipeline_results") && is.data.frame(pipeline_results) && nrow(pipeline_results) > 0) {
     cat("✅ Using existing pipeline_results data\n")
     base_data <- pipeline_results
     
