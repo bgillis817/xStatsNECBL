@@ -1,0 +1,29 @@
+name: Deploy only
+on:
+  workflow_dispatch: {}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev libuv1-dev libsodium-dev
+      - name: Install R packages
+        run: |
+          Rscript -e 'install.packages(c("rsconnect","pacman","dplyr","readr","data.table","tidyr","lubridate","stringr","googledrive","xgboost","caret","shiny","shinydashboard","DT","ggplot2","rvest","httr","xml2","plotly","viridis","gridExtra","scales","jsonlite"), repos="https://cloud.r-project.org")'
+      - name: Write Google service account key
+        run: echo '${{ secrets.GDRIVE_SA_KEY }}' > service_account.json
+      - name: Deploy to shinyapps.io
+        env:
+          SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
+          SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
+        run: |
+          Rscript -e 'rsconnect::setAccountInfo(name = "2y34z6-ben-gillis", token = Sys.getenv("SHINYAPPS_TOKEN"), secret = Sys.getenv("SHINYAPPS_SECRET")); rsconnect::deployApp(appDir = ".", appName = "XwOBADashboard", forceUpdate = TRUE, launch.browser = FALSE)'
+      - name: Clean up service account key
+        if: always()
+        run: rm -f service_account.json
