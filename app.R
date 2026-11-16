@@ -1803,7 +1803,33 @@ ui <- dashboardPage(
   
   dashboardBody(
     tags$head(
+      # Load fonts and icons from CDNs so the dashboard looks the same no matter
+      # which package versions shinyapps.io installs (local font files were not loading)
+      tags$link(rel = "stylesheet",
+                href = "https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,600,700,300italic,400italic,600italic"),
+      tags$link(rel = "stylesheet",
+                href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"),
       tags$style(HTML("
+        @font-face {
+          font-family: 'FA Solid CDN';
+          font-style: normal;
+          font-weight: 900;
+          font-display: block;
+          src: url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/webfonts/fa-solid-900.woff2') format('woff2');
+        }
+        .fa, .fas, .fa-solid {
+          font-family: 'FA Solid CDN', 'Font Awesome 6 Free', 'Font Awesome 5 Free', 'FontAwesome' !important;
+          font-weight: 900 !important;
+        }
+        body, h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6,
+        .content-wrapper, .main-sidebar, .sidebar-menu, .box, .box-title,
+        .btn, .form-control, .control-label, .selectize-input, .selectize-dropdown,
+        .dataTables_wrapper, table.dataTable {
+          font-family: 'Source Sans Pro', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+        .main-header .logo {
+          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
         .content-wrapper, .right-side {
           background-color: #f4f4f4;
         }
