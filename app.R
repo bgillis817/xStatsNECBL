@@ -249,7 +249,7 @@ engineer_xwoba_features <- function(clean_data) {
   # Physics calculations
   la_rad <- la * pi / 180
   
-  cat("🔧 Creating feature categories:\n")
+  cat("Creating feature categories:\n")
   
   # 1. Raw measurements
   cat("  - Raw measurements\n")
@@ -420,7 +420,7 @@ analyze_sweet_spots <- function(clean_data, features) {
                                       ifelse(la > 35, (90 - la) / 55, 0))) * 0.4)
   )
   
-  cat("✅ Sweet spot analysis complete!\n")
+  cat("Sweet spot analysis complete!\n")
   
   return(list(
     grid_analysis = sweet_spot_grid,
@@ -1547,10 +1547,10 @@ match_necbl_data_composite <- function(expected_data, necbl_data, selected_seaso
   exact_matches <- sum(!is.na(matched_data$actual_woba_final))
   
   cat("\n=== STANDARDIZED NAME MATCHING SUMMARY ===\n")
-  cat("🎯 SEASON FOCUS:", selected_season, "\n")
-  cat("✅ EXPECTED RECORDS FOR", selected_season, ":", total_records, "(100%)\n")
-  cat("🎯 EXACT MATCHES FOUND:", exact_matches, "\n")
-  cat("📝 ALL NAMES NOW IN 'LASTNAME, F' FORMAT\n")
+  cat("SEASON FOCUS:", selected_season, "\n")
+  cat("EXPECTED RECORDS FOR", selected_season, ":", total_records, "(100%)\n")
+  cat("EXACT MATCHES FOUND:", exact_matches, "\n")
+  cat("ALL NAMES NOW IN 'LASTNAME, F' FORMAT\n")
   
   return(matched_data)
 }
@@ -1600,6 +1600,19 @@ analyze_match_quality <- function(matched_data) {
 get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
   cat("=== LOADING ALL NECBL SEASONS (2021-2025) WITH COMPOSITE KEYS ===\n")
   
+  # Use the stats the daily pipeline already scraped (live scraping from
+  # shinyapps.io is blocked by the stats site with HTTP 403)
+  if (exists("necbl_stats_cache") && length(necbl_stats_cache) > 0) {
+    cached <- Filter(function(d) is.data.frame(d) && nrow(d) > 0, necbl_stats_cache)
+    if (length(cached) > 0) {
+      all_seasons_data <- dplyr::bind_rows(cached)
+      cat("Loaded", nrow(all_seasons_data), "records from cache for seasons:",
+          paste(names(cached), collapse = ", "), "\n")
+      if (!is.null(progress_callback)) progress_callback(detail = "Loaded from cache", value = 1)
+      return(all_seasons_data)
+    }
+  }
+  
   all_seasons_data <- data.frame()
   seasons <- c("2021", "2022", "2023", "2024", "2025")
   total_composite_keys <- 0
@@ -1610,7 +1623,7 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
                         value = i / length(seasons))
     }
     
-    cat("\n📅 Scraping", seasons[i], "season...\n")
+    cat("\nScraping", seasons[i], "season...\n")
     season_data <- get_necbl_woba_by_season(seasons[i])
     
     if (nrow(season_data) > 0) {
@@ -1621,17 +1634,17 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
         filter(n() > 1)
       
       if (nrow(duplicate_check) > 0) {
-        cat("⚠️  WARNING:", nrow(duplicate_check), "duplicate composite keys in", seasons[i], "\n")
+        cat("WARNING:", nrow(duplicate_check), "duplicate composite keys in", seasons[i], "\n")
         print(duplicate_check %>% select(Player, Player_Team_Season_Key, Team))
       } else {
-        cat("✅ All", length(season_keys), "composite keys unique for", seasons[i], "\n")
+        cat("All", length(season_keys), "composite keys unique for", seasons[i], "\n")
       }
       
       all_seasons_data <- rbind(all_seasons_data, season_data)
       total_composite_keys <- total_composite_keys + length(season_keys)
-      cat("📊 Added", nrow(season_data), "records for", seasons[i], "\n")
+      cat("Added", nrow(season_data), "records for", seasons[i], "\n")
     } else {
-      cat("❌ No data found for", seasons[i], "\n")
+      cat("No data found for", seasons[i], "\n")
     }
     
     # Small delay between seasons
@@ -1648,14 +1661,14 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
       filter(n() > 1)
     
     if (nrow(duplicate_keys) > 0) {
-      cat("❌ CRITICAL ERROR:", nrow(duplicate_keys), "duplicate composite keys across all seasons!\n")
+      cat("CRITICAL ERROR:", nrow(duplicate_keys), "duplicate composite keys across all seasons!\n")
       print(duplicate_keys %>% select(Player, Player_Team_Season_Key, Season, Team))
     } else {
-      cat("✅ ALL", length(unique(all_keys)), "COMPOSITE KEYS ARE GLOBALLY UNIQUE!\n")
+      cat("ALL", length(unique(all_keys)), "COMPOSITE KEYS ARE GLOBALLY UNIQUE!\n")
     }
     
     # Summary statistics
-    cat("\n📈 COMPOSITE KEY SUMMARY:\n")
+    cat("\nCOMPOSITE KEY SUMMARY:\n")
     season_summary <- all_seasons_data %>%
       group_by(Season) %>%
       summarise(
@@ -1671,7 +1684,7 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
     print(season_summary)
     
     # Show sample composite keys from each season
-    cat("\n🔍 SAMPLE COMPOSITE KEYS BY SEASON:\n")
+    cat("\nSAMPLE COMPOSITE KEYS BY SEASON:\n")
     sample_keys <- all_seasons_data %>%
       group_by(Season) %>%
       slice_head(n = 2) %>%
@@ -1681,14 +1694,14 @@ get_all_necbl_seasons_composite <- function(progress_callback = NULL) {
     print(sample_keys)
     
   } else {
-    cat("❌ NO DATA LOADED FROM ANY SEASON\n")
+    cat("NO DATA LOADED FROM ANY SEASON\n")
   }
   
   cat("\n=== TOTAL NECBL DATA LOADED ===\n")
-  cat("📊 Total records across all seasons:", nrow(all_seasons_data), "\n")
-  cat("🔑 Total unique composite keys:", length(unique(all_seasons_data$Player_Team_Season_Key)), "\n")
-  cat("📅 Seasons loaded:", paste(unique(all_seasons_data$Season), collapse = ", "), "\n")
-  cat("🏟️  Teams represented:", length(unique(all_seasons_data$Team_Abbrev)), "\n")
+  cat("Total records across all seasons:", nrow(all_seasons_data), "\n")
+  cat("Total unique composite keys:", length(unique(all_seasons_data$Player_Team_Season_Key)), "\n")
+  cat("Seasons loaded:", paste(unique(all_seasons_data$Season), collapse = ", "), "\n")
+  cat("Teams represented:", length(unique(all_seasons_data$Team_Abbrev)), "\n")
   
   return(all_seasons_data)
 }
@@ -1701,35 +1714,35 @@ initialize_enhanced_data_composite <- function() {
   # (avoids re-scoring every row for every session, which ran the app out of memory)
   if (exists("enhanced_data") && is.data.frame(enhanced_data) && nrow(enhanced_data) > 0 &&
       "predicted_xwoba_final" %in% names(enhanced_data)) {
-    cat("✅ Using pre-computed enhanced_data from xwoba_model.rds\n")
+    cat("Using pre-computed enhanced_data from xwoba_model.rds\n")
     base_data <- enhanced_data
 
   } else if (exists("pipeline_results") && is.data.frame(pipeline_results) && nrow(pipeline_results) > 0) {
-    cat("✅ Using existing pipeline_results data\n")
+    cat("Using existing pipeline_results data\n")
     base_data <- pipeline_results
     
     # Ensure proper xwOBA/xwOBACON separation
     if (!"predicted_xwobacon_final" %in% names(base_data)) {
-      cat("🔄 Recalculating xwOBA/xwOBACON separation...\n")
+      cat("Recalculating xwOBA/xwOBACON separation...\n")
       base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
     }
     
   } else if (exists("combined_df") && is.data.frame(combined_df) && nrow(combined_df) > 0) {
-    cat("✅ Using existing combined_df data\n")
+    cat("Using existing combined_df data\n")
     base_data <- combined_df
     
     # Ensure proper xwOBA/xwOBACON separation
     if (!"predicted_xwobacon_final" %in% names(base_data)) {
-      cat("🔄 Recalculating xwOBA/xwOBACON separation...\n")
+      cat("Recalculating xwOBA/xwOBACON separation...\n")
       base_data <- calculate_expected_xwoba_and_full(base_data, if(exists("expected")) expected else NULL)
     }
     
   } else if (exists("raw_data") && is.data.frame(raw_data) && nrow(raw_data) > 0) {
-    cat("✅ Using raw_data and applying expected calculations\n")
+    cat("Using raw_data and applying expected calculations\n")
     base_data <- calculate_expected_xwoba_and_full(raw_data, if(exists("expected")) expected else NULL)
     
   } else {
-    cat("❌ No existing data found - create sample data first\n")
+    cat("No existing data found - create sample data first\n")
     return(NULL)
   }
   
@@ -1738,7 +1751,7 @@ initialize_enhanced_data_composite <- function() {
   missing_cols <- required_cols[!required_cols %in% names(base_data)]
   
   if (length(missing_cols) > 0) {
-    cat("❌ MISSING REQUIRED COLUMNS:", paste(missing_cols, collapse = ", "), "\n")
+    cat("MISSING REQUIRED COLUMNS:", paste(missing_cols, collapse = ", "), "\n")
     return(NULL)
   }
   
@@ -1747,11 +1760,11 @@ initialize_enhanced_data_composite <- function() {
   mapped_teams <- names(necbl_team_mapping_enhanced)
   unmapped_teams <- unique_teams[!unique_teams %in% mapped_teams]
   
-  cat("🏟️  TEAM CODE VERIFICATION:\n")
+  cat("TEAM CODE VERIFICATION:\n")
   cat("   Expected teams found:", paste(intersect(unique_teams, mapped_teams), collapse = ", "), "\n")
   
   if (length(unmapped_teams) > 0) {
-    cat("⚠️  UNMAPPED TEAM CODES:", paste(unmapped_teams, collapse = ", "), "\n")
+    cat("UNMAPPED TEAM CODES:", paste(unmapped_teams, collapse = ", "), "\n")
     cat("   These will get 'UNK' abbreviation in composite keys\n")
   }
   
@@ -1767,7 +1780,7 @@ initialize_enhanced_data_composite <- function() {
       data_source = "Expected Only"
     )
   
-  cat("\n✅ Enhanced data initialized with", nrow(final_data), "total records\n")
+  cat("\nEnhanced data initialized with", nrow(final_data), "total records\n")
   
   return(final_data)
 }
@@ -1849,7 +1862,7 @@ ui <- dashboardPage(
                                         class = "btn btn-primary", icon = icon("download"))
                     ),
                     column(3,
-                           actionButton("load_all", "Load All Seasons (2021-2025)", 
+                           actionButton("load_all", "Load All Seasons (2021-2026)", 
                                         class = "btn btn-info", icon = icon("database"))
                     ),
                     column(6,
@@ -1987,7 +2000,7 @@ server <- function(input, output, session) {
       values$expected_data <- initialize_enhanced_data_composite()
       if (!is.null(values$expected_data)) {
         values$enhanced_data <- values$expected_data
-        cat("✅ Initialized with", nrow(values$enhanced_data), "expected records\n")
+        cat("Initialized with", nrow(values$enhanced_data), "expected records\n")
       }
     }
   })
@@ -2106,13 +2119,13 @@ server <- function(input, output, session) {
           
         } else {
           showNotification(
-            paste("❌ No data found for", input$primary_season, "season"),
+            paste("No data found for", input$primary_season, "season"),
             type = "error", duration = 10
           )
         }
       }, error = function(e) {
         showNotification(
-          paste("❌ Error loading", input$primary_season, ":", e$message),
+          paste("Error loading", input$primary_season, ":", e$message),
           type = "error", duration = 15
         )
       })
@@ -2129,7 +2142,14 @@ server <- function(input, output, session) {
           incProgress(value * 0.8, detail = detail)
         }
         
-        values$necbl_data_all <- get_all_necbl_seasons_composite(progress_func)
+        # Use the stats the daily pipeline already scraped (live scraping from
+        # shinyapps.io gets HTTP 403 from PrestoSports); scrape only as a fallback
+        values$necbl_data_all <- if (length(necbl_stats_cache) > 0) {
+          incProgress(0.8, detail = "Loading cached NECBL stats...")
+          dplyr::bind_rows(necbl_stats_cache)
+        } else {
+          get_all_necbl_seasons_composite(progress_func)
+        }
         
         if (!is.null(values$necbl_data_all) && nrow(values$necbl_data_all) > 0) {
           values$necbl_data_current <- values$necbl_data_all %>%
@@ -2152,10 +2172,10 @@ server <- function(input, output, session) {
           incProgress(1.0, detail = "All seasons loaded!")
           
         } else {
-          showNotification("❌ Error loading season data", type = "error", duration = 10)
+          showNotification("Error loading season data", type = "error", duration = 10)
         }
       }, error = function(e) {
-        showNotification(paste("❌ Error loading all seasons:", e$message), type = "error", duration = 15)
+        showNotification(paste("Error loading all seasons:", e$message), type = "error", duration = 15)
       })
     })
   })
@@ -2496,19 +2516,19 @@ launch_xwoba_dashboard_composite <- function() {
   data_exists <- exists("pipeline_results") || exists("combined_df") || exists("raw_data")
   
   if (!data_exists) {
-    stop("❌ No expected data found. Please ensure 'pipeline_results', 'combined_df', or 'raw_data' exists in your environment.")
+    stop("No expected data found. Please ensure 'pipeline_results', 'combined_df', or 'raw_data' exists in your environment.")
   }
   
-  cat("🎯 Launching Enhanced xwOBA Dashboard - Matched Players Only Edition...\n")
-  cat("✅ Season-aware matching system\n")
-  cat("✅ Expected data filtered by season BEFORE matching\n")
-  cat("✅ MATCHED PLAYERS ONLY - no unmatched players shown\n") 
-  cat("✅ OCE_STA and OCE_STA6 both map to Ocean State Waves\n")
-  cat("✅ NSH_N maps to North Shore Navigators\n")
-  cat("✅ 'X' character removal from NECBL player names\n")
-  cat("✅ FIXED: Multi-season players properly separated by season\n")
-  cat("✅ Interactive Plotly visualizations\n")
-  cat("✅ Season-specific filtering and analysis throughout\n")
+  cat("Launching Enhanced xwOBA Dashboard - Matched Players Only Edition...\n")
+  cat("Season-aware matching system\n")
+  cat("Expected data filtered by season BEFORE matching\n")
+  cat("MATCHED PLAYERS ONLY - no unmatched players shown\n") 
+  cat("OCE_STA and OCE_STA6 both map to Ocean State Waves\n")
+  cat("NSH_N maps to North Shore Navigators\n")
+  cat("'X' character removal from NECBL player names\n")
+  cat("FIXED: Multi-season players properly separated by season\n")
+  cat("Interactive Plotly visualizations\n")
+  cat("Season-specific filtering and analysis throughout\n")
   
   shinyApp(ui = ui, server = server)
 }
@@ -2524,12 +2544,12 @@ verify_data_readiness <- function() {
   if (exists("raw_data")) data_sources <- c(data_sources, "raw_data")
   
   if (length(data_sources) == 0) {
-    cat("❌ NO DATA FOUND\n")
+    cat("NO DATA FOUND\n")
     cat("   Please ensure 'pipeline_results', 'combined_df', or 'raw_data' exists in your environment\n")
     return(FALSE)
   }
   
-  cat("✅ DATA SOURCES FOUND:", paste(data_sources, collapse = ", "), "\n")
+  cat("DATA SOURCES FOUND:", paste(data_sources, collapse = ", "), "\n")
   
   # Get the primary data source
   if (exists("pipeline_results")) {
@@ -2543,18 +2563,18 @@ verify_data_readiness <- function() {
     data_name <- "raw_data"
   }
   
-  cat("📊 PRIMARY DATA SOURCE:", data_name, "with", nrow(primary_data), "records\n")
+  cat("PRIMARY DATA SOURCE:", data_name, "with", nrow(primary_data), "records\n")
   
   # Check required columns
   required_cols <- c("Batter", "BatterTeam")
   missing_cols <- required_cols[!required_cols %in% names(primary_data)]
   
   if (length(missing_cols) > 0) {
-    cat("❌ MISSING REQUIRED COLUMNS:", paste(missing_cols, collapse = ", "), "\n")
+    cat("MISSING REQUIRED COLUMNS:", paste(missing_cols, collapse = ", "), "\n")
     return(FALSE)
   }
   
-  cat("✅ REQUIRED COLUMNS FOUND:", paste(required_cols, collapse = ", "), "\n")
+  cat("REQUIRED COLUMNS FOUND:", paste(required_cols, collapse = ", "), "\n")
   
   # Check for season information
   if ("Date" %in% names(primary_data)) {
@@ -2563,17 +2583,17 @@ verify_data_readiness <- function() {
       count(Season) %>%
       arrange(Season)
     
-    cat("🗓️  SEASONS FOUND IN DATA:\n")
+    cat("SEASONS FOUND IN DATA:\n")
     print(seasons_found)
   } else if ("Expected_Season" %in% names(primary_data)) {
     seasons_found <- primary_data %>%
       count(Expected_Season) %>%
       arrange(Expected_Season)
     
-    cat("🗓️  SEASONS FOUND IN DATA:\n")
+    cat("SEASONS FOUND IN DATA:\n")
     print(seasons_found)
   } else {
-    cat("⚠️  NO SEASON INFORMATION FOUND - will default to 2025\n")
+    cat("NO SEASON INFORMATION FOUND - will default to 2025\n")
   }
   
   # Check team codes
@@ -2581,17 +2601,17 @@ verify_data_readiness <- function() {
   mapped_teams <- names(necbl_team_mapping_enhanced)
   unmapped_teams <- unique_teams[!unique_teams %in% mapped_teams]
   
-  cat("🏟️  TEAM CODE STATUS:\n")
+  cat("TEAM CODE STATUS:\n")
   cat("   Total unique team codes:", length(unique_teams), "\n")
   cat("   Mapped team codes:", length(intersect(unique_teams, mapped_teams)), "\n")
   
   if (length(unmapped_teams) > 0) {
-    cat("⚠️  UNMAPPED TEAM CODES:", paste(unmapped_teams, collapse = ", "), "\n")
+    cat("UNMAPPED TEAM CODES:", paste(unmapped_teams, collapse = ", "), "\n")
     cat("   These will get 'UNK' abbreviation\n")
   }
   
   # Show sample data with season info
-  cat("\n🔍 SAMPLE DATA PREVIEW:\n")
+  cat("\nSAMPLE DATA PREVIEW:\n")
   if ("Date" %in% names(primary_data)) {
     sample_data <- primary_data %>%
       mutate(Season = as.character(year(as.Date(Date)))) %>%
@@ -2604,7 +2624,7 @@ verify_data_readiness <- function() {
   }
   print(sample_data)
   
-  cat("\n✅ MATCHED PLAYERS ONLY DATA VERIFICATION COMPLETE - READY FOR LAUNCH!\n")
+  cat("\nMATCHED PLAYERS ONLY DATA VERIFICATION COMPLETE - READY FOR LAUNCH!\n")
   return(TRUE)
 }
 
@@ -2613,7 +2633,7 @@ test_composite_key_system <- function() {
   cat("=== TESTING MATCHED PLAYERS ONLY SYSTEM ===\n")
   
   # Test season filtering logic
-  cat("\n🗓️  TESTING SEASON FILTERING LOGIC:\n")
+  cat("\nTESTING SEASON FILTERING LOGIC:\n")
   
   if (exists("pipeline_results")) {
     if ("Date" %in% names(pipeline_results)) {
@@ -2643,49 +2663,49 @@ test_composite_key_system <- function() {
     cat("   No pipeline_results found - cannot test season filtering\n")
   }
   
-  cat("\n✅ MATCHED PLAYERS ONLY SYSTEM TEST COMPLETE!\n")
+  cat("\nMATCHED PLAYERS ONLY SYSTEM TEST COMPLETE!\n")
 }
 
 # Enhanced usage instructions - MATCHED PLAYERS ONLY VERSION
 print_usage_instructions <- function() {
   cat("=== ENHANCED xwOBA DASHBOARD - MATCHED PLAYERS ONLY EDITION ===\n\n")
   
-  cat("🚀 QUICK START:\n")
+  cat("QUICK START:\n")
   cat("   1. verify_data_readiness()              # Check if your data is ready\n")
   cat("   2. test_composite_key_system()          # Test the matched players only system\n")
   cat("   3. launch_xwoba_dashboard_composite()   # Launch the dashboard\n\n")
   
-  cat("🔧 KEY FIXES IN THIS VERSION:\n")
-  cat("   ✅ FIXED: Only matched players shown throughout dashboard\n")
-  cat("   ✅ FIXED: No unmatched or expected-only players displayed\n")
-  cat("   ✅ FIXED: All plots, tables, and analysis show actual vs expected only\n")
-  cat("   ✅ FIXED: Season-aware matching prevents data contamination\n")
-  cat("   ✅ FIXED: Clean interface focusing on players with both metrics\n\n")
+  cat("KEY FIXES IN THIS VERSION:\n")
+  cat("   FIXED: Only matched players shown throughout dashboard\n")
+  cat("   FIXED: No unmatched or expected-only players displayed\n")
+  cat("   FIXED: All plots, tables, and analysis show actual vs expected only\n")
+  cat("   FIXED: Season-aware matching prevents data contamination\n")
+  cat("   FIXED: Clean interface focusing on players with both metrics\n\n")
   
-  cat("📋 KEY FEATURES:\n")
-  cat("   ✅ Matched players only (no expected-only players shown)\n")
-  cat("   ✅ Season-aware matching with proper filtering\n")
-  cat("   ✅ Interactive Plotly plots with matched player tooltips\n")
-  cat("   ✅ All analysis restricted to players with actual NECBL data\n")
-  cat("   ✅ Enhanced verification and debugging tools\n")
-  cat("   ✅ OCE_STA/OCE_STA6 both map correctly to Ocean State Waves\n")
-  cat("   ✅ NSH_N maps correctly to North Shore Navigators\n")
-  cat("   ✅ 'X' character removal from NECBL player names\n\n")
+  cat("KEY FEATURES:\n")
+  cat("   Matched players only (no expected-only players shown)\n")
+  cat("   Season-aware matching with proper filtering\n")
+  cat("   Interactive Plotly plots with matched player tooltips\n")
+  cat("   All analysis restricted to players with actual NECBL data\n")
+  cat("   Enhanced verification and debugging tools\n")
+  cat("   OCE_STA/OCE_STA6 both map correctly to Ocean State Waves\n")
+  cat("   NSH_N maps correctly to North Shore Navigators\n")
+  cat("   'X' character removal from NECBL player names\n\n")
   
-  cat("📖 DASHBOARD USAGE:\n")
+  cat("DASHBOARD USAGE:\n")
   cat("   1. Launch dashboard and select your desired season (2025, 2024, etc.)\n")
   cat("   2. Click 'Load Selected Season' to get NECBL data for that season only\n")
   cat("   3. Dashboard automatically shows only matched players\n")
   cat("   4. All analysis (plots, tables) shows only players with both expected and actual data\n")
   cat("   5. Multi-season players properly separated by season\n\n")
   
-  cat("⚠️  REQUIREMENTS:\n")
+  cat("REQUIREMENTS:\n")
   cat("   • Your data must have 'Batter', 'BatterTeam', and 'Date' columns\n")
   cat("   • Date column used to extract season information\n")
   cat("   • Internet connection for NECBL data scraping\n")
   cat("   • R packages: shiny, shinydashboard, DT, ggplot2, dplyr, tidyr, rvest, httr, stringr, xml2, plotly\n\n")
   
-  cat("🎯 TROUBLESHOOTING:\n")
+  cat("TROUBLESHOOTING:\n")
   cat("   • No players showing? Load NECBL data first to get matches\n")
   cat("   • Player showing in multiple seasons? Check if Date column exists and is formatted correctly\n")
   cat("   • No data loading? Check internet connection and NECBL website status\n\n")
@@ -2693,11 +2713,11 @@ print_usage_instructions <- function() {
 
 # Quick test function to verify matched players only system works
 quick_composite_test <- function() {
-  cat("🔥 QUICK MATCHED PLAYERS ONLY TEST\n")
+  cat("QUICK MATCHED PLAYERS ONLY TEST\n")
   
   # Test with actual data if available
   if (exists("pipeline_results")) {
-    cat("✅ Testing with pipeline_results...\n")
+    cat("Testing with pipeline_results...\n")
     
     # Check for season information
     if ("Date" %in% names(pipeline_results)) {
@@ -2706,7 +2726,7 @@ quick_composite_test <- function() {
         count(Season) %>%
         arrange(Season)
       
-      cat("✅ Season information found:\n")
+      cat("Season information found:\n")
       print(seasons)
       
       # Test season filtering
@@ -2715,38 +2735,38 @@ quick_composite_test <- function() {
         filter(Season == "2025")
       
       if (nrow(test_2025) > 0) {
-        cat("✅ Season filtering works: 2025 has", nrow(test_2025), "records\n")
+        cat("Season filtering works: 2025 has", nrow(test_2025), "records\n")
         
         # Test a small scrape and match for 2025
         small_test <- tryCatch({
           get_necbl_woba_by_season("2025")
         }, error = function(e) {
-          cat("❌ Scraping test failed:", e$message, "\n")
+          cat("Scraping test failed:", e$message, "\n")
           return(data.frame())
         })
         
         if (nrow(small_test) > 0) {
-          cat("✅ Scraping works:", nrow(small_test), "players for 2025\n")
+          cat("Scraping works:", nrow(small_test), "players for 2025\n")
           
           # Test matched players only matching
           small_match <- match_necbl_data_composite(pipeline_results, small_test, "2025")
           matches <- sum(!is.na(small_match$actual_woba_final))
-          cat("✅ Matched players only matching works:", matches, "matches for 2025\n")
+          cat("Matched players only matching works:", matches, "matches for 2025\n")
           
           if (matches > 0) {
-            cat("🎉 MATCHED PLAYERS ONLY SYSTEM IS WORKING! Ready to launch dashboard.\n")
+            cat("MATCHED PLAYERS ONLY SYSTEM IS WORKING! Ready to launch dashboard.\n")
             return(TRUE)
           }
         }
       } else {
-        cat("⚠️  No 2025 data found - try different season\n")
+        cat("No 2025 data found - try different season\n")
       }
     } else {
-      cat("⚠️  No Date column found - season awareness may not work\n")
+      cat("No Date column found - season awareness may not work\n")
     }
   }
   
-  cat("⚠️  Test inconclusive - run verify_data_readiness() for details\n")
+  cat("Test inconclusive - run verify_data_readiness() for details\n")
   return(FALSE)
 }
 
@@ -2759,7 +2779,7 @@ cat("=== ENHANCED xwOBA DASHBOARD - MATCHED PLAYERS ONLY EDITION LOADED! ===\n\n
 
 print_usage_instructions()
 
-cat("🔥 READY TO LAUNCH WITH MATCHED PLAYERS ONLY! Run: launch_xwoba_dashboard_composite()\n\n")
+cat("READY TO LAUNCH WITH MATCHED PLAYERS ONLY! Run: launch_xwoba_dashboard_composite()\n\n")
 
 # Make main functions available in global environment
 if (!exists("launch_xwoba_dashboard")) {
